@@ -75,6 +75,43 @@ impl GroupWithMinTimeAndSize {
     }
 }
 
+
+/// Wrapper of group of parquet files with their min time and total size
+#[derive(Debug, Clone, PartialEq)]
+pub struct GroupWithMinTimeAndSize2 {
+    /// Parquet files and their metadata
+    pub(crate) parquet_files: Vec<ParquetFile>,
+
+    /// min time of all parquet_files
+    pub(crate) min_time: Timestamp,
+
+    /// total size of all file
+    pub(crate) total_file_size_bytes: i64,
+}
+
+impl GroupWithMinTimeAndSize2 {
+    /// Make GroupWithMinTimeAndSize for a given set of parquet files
+    pub fn new(files: Vec<ParquetFile>) -> Self {
+        let mut group = Self {
+            parquet_files: files,
+            min_time: Timestamp::new(i64::MAX),
+            total_file_size_bytes: 0,
+        };
+
+        assert!(
+            !group.parquet_files.is_empty(),
+            "invalid empty group for computing min time and total size"
+        );
+
+        for file in &group.parquet_files {
+            group.min_time = group.min_time.min(file.min_time);
+            group.total_file_size_bytes += file.file_size_bytes;
+        }
+
+        group
+    }
+}
+
 /// Wrapper of a parquet file and its tombstones
 #[allow(missing_docs)]
 #[derive(Debug, Clone)]

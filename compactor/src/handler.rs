@@ -194,17 +194,26 @@ async fn run_compactor(compactor: Arc<Compactor>, shutdown: CancellationToken) {
 
         let mut used_size = 0;
         let max_size = compactor.config.max_concurrent_compaction_size_bytes();
+        let compaction_max_size_bytes = compactor.config.compaction_max_size_bytes();
         let max_desired_file_size = compactor.config.compaction_max_desired_file_size_bytes();
         let max_file_count = compactor.config.compaction_max_file_count();
         let mut handles = vec![];
 
         for c in candidates {
             let compactor = Arc::clone(&compactor);
-            let compact_and_upgrade = compactor
-                .groups_to_compact_and_files_to_upgrade(
+            // TODO: remove this
+            // let compact_and_upgrade = compactor
+            //     .groups_to_compact_and_files_to_upgrade(
+            //         c.candidate.partition_id,
+            //         max_desired_file_size,
+            //         max_file_count,
+            //     )
+            //     .await;
+
+            let compact_split_and_upgrade = compactor
+                .groups_to_compact_files_to_split_and_files_to_upgrade(
                     c.candidate.partition_id,
-                    max_desired_file_size,
-                    max_file_count,
+                    compaction_max_size_bytes,
                 )
                 .await;
 

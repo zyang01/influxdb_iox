@@ -5,7 +5,7 @@ use crate::{
     query::QueryableParquetChunk,
     utils::{
         CatalogUpdate, CompactedData, GroupWithMinTimeAndSize, GroupWithTombstones,
-        ParquetFileWithTombstone,
+        ParquetFileWithTombstone, GroupWithMinTimeAndSize2,
     },
 };
 use backoff::BackoffConfig;
@@ -162,6 +162,7 @@ pub enum Error {
 /// A specialized `Error` for Compactor Data errors
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+
 /// Data of parquet files to compact and upgrade
 #[derive(Debug)]
 pub struct CompactAndUpgrade {
@@ -188,6 +189,40 @@ impl CompactAndUpgrade {
     }
 
     /// Return sequncer ID
+    pub fn sequencer_id(&self) -> Option<SequencerId> {
+        self.sequencer_id
+    }
+}
+
+/// Data of parquet files to compact and upgrade
+#[derive(Debug)]
+pub struct CompactSplitAndUpgrade {
+    // sequencer ID of all files in this struct
+    sequencer_id: Option<SequencerId>,
+    // Each group will be compacted into one file
+    groups_to_compact: Vec<GroupWithTombstones>,
+    // Each file will be split into many files based on the input times
+    files_to_split: Vec<ParquetFile>, // todo: replace with new struct
+    // level-0 files to be upgraded to level 2
+    files_to_upgrade: Vec<ParquetFileId>,
+}
+
+impl CompactSplitAndUpgrade {
+    fn new(sequencer_id: Option<SequencerId>) -> Self {
+        Self {
+            sequencer_id,
+            groups_to_compact: vec![],
+            files_to_split: vec![],
+            files_to_upgrade: vec![],
+        }
+    }
+
+    /// Return true if there are files to compact and/or upgrade
+    pub fn compactable(&self) -> bool {
+        !self.groups_to_compact.is_empty() || !self.files_to_split.is_empty() || !self.files_to_upgrade.is_empty()
+    }
+
+    /// Return sequencer ID
     pub fn sequencer_id(&self) -> Option<SequencerId> {
         self.sequencer_id
     }
@@ -457,6 +492,7 @@ impl Compactor {
         Ok(partition)
     }
 
+    // TODO; remove this
     /// Group files to be compacted together and level-0 files that will get upgraded
     /// for a given partition.
     /// The number of compacting files per group will be limited by thier total size and number of files
@@ -519,6 +555,89 @@ impl Compactor {
         }
 
         Ok(compact_and_upgrade)
+    }
+
+    // TODO: update comments
+    /// Group files to be compacted together and level-0 files that will get upgraded
+    /// for a given partition.
+    /// The number of compacting files per group will be limited by thier total size and number of files
+    pub async fn groups_to_compact_files_to_split_and_files_to_upgrade(
+        &self,
+        partition_id: PartitionId,
+        compaction_max_size_bytes: i64, // max size of files to get compacted
+    ) -> Result<CompactSplitAndUpgrade> {
+        let mut compact_split_and_upgrade = CompactSplitAndUpgrade::new(None);
+
+        // List all valid (not soft deletded) files of the partition
+        let parquet_files = self
+            .catalog
+            .repositories()
+            .await
+            .parquet_files()
+            .list_by_partition_not_to_delete(partition_id)
+            .await
+            .context(ListParquetFilesSnafu)?;
+        if parquet_files.is_empty() {
+            return Ok(compact_split_and_upgrade);
+        }
+
+        compact_split_and_upgrade.sequencer_id = Some(parquet_files[0].sequencer_id);
+
+        // Group overlapped files
+        // Each group will be limited by their size and number of files
+        let overlapped_file_groups = Self::overlapped_groups_2(
+            parquet_files,
+            compaction_max_size_bytes,
+        )?;
+
+        // Group time-contiguous non-overlapped groups if their total size is smaller than a threshold
+        let compact_and_split = Self::group_small_contiguous_groups_2(
+            overlapped_file_groups,
+            compaction_max_size_bytes,
+        );
+
+        // Attach appropriate tombstones to each file
+        let compact_groups = self.add_tombstones_to_groups(compact_and_split.compact_groups).await?;
+        let split_groups = self.add_tombstones_to_groups(compact_and_split.split_groups).await?;
+        info!("Compacting {} groups. Splitting {} groups", compact_groups.len(), split_groups.len());
+
+        // groups to compact and files to upgrade
+        for group in compact_groups  {
+            // Only one file without tombstones, no need to compact.
+            if group.parquet_files.len() == 1 && group.tombstones.is_empty() {
+                // If it is level 0, upgrade it since it is non-overlapping
+                if group.parquet_files[0].compaction_level !=  FILE_NON_OVERLAPPED_COMAPCTION_LEVEL {
+                    compact_split_and_upgrade
+                        .files_to_upgrade
+                        .push(group.parquet_files[0].parquet_file_id())
+                }
+            } else {
+                compact_split_and_upgrade.groups_to_compact.push(group);
+            }
+        }
+
+        // groups to split their file content
+        for group in split_groups {
+
+            let mut total_size = 0;
+            let mut min_time = i64::MAX;
+            let mut max_time = i64::MIN;
+            for f in group.parquet_files {
+                total_size += f.file_size_bytes;
+                min_time = min(min_time, f.min_time.get());
+                max_time = max(max_time, f.max_time.get());
+            }
+
+            let split_times = Self::compute_split_time(min_time, max_time, total_size, compaction_max_size_bytes);
+
+            // Attach appropriate split time to each files
+            // todo
+
+        }
+
+        
+
+        Ok(compact_split_and_upgrade)
     }
 
     /// Runs compaction in a partition resolving any tombstones and compacting data so that parquet
@@ -648,7 +767,7 @@ impl Compactor {
         // Remove fully processed tombstones
         self.remove_fully_processed_tombstones(tombstones).await?;
 
-        // Upgrade old level-0 to level 1
+        // Upgrade old level-0 to level 2
         self.update_to_level_2(&compact_and_upgrade.files_to_upgrade)
             .await?;
 
@@ -672,6 +791,7 @@ impl Compactor {
         Ok(())
     }
 
+    // TODO: update the comment to reflect the changes
     // Group time-contiguous non-overlapped groups if their total size is smaller than a threshold
     // There are 2 types of input groups
     //   1. Type-1: Groups that inlcude overlapped files but the groups do not overlap with other groups
@@ -713,8 +833,7 @@ impl Compactor {
     //
     //  Note that even if groups [6_6] and [4_4] are very small, they cannot be combined
     //  because chunk 6_6 overlaps with chunk 5_5. Combining [6_6] and [4_4] will lead to
-    //  a bad comacting result of 2 chunks 5_5 and 4_6 that overlap in both time and sequence numbers
-
+    //  a bad comapcting result of 2 chunks 5_5 and 4_6 that overlap in both time and sequence numbers
     fn group_small_contiguous_groups(
         mut file_groups: Vec<GroupWithMinTimeAndSize>,
         compaction_max_size_bytes: i64,
@@ -770,6 +889,68 @@ impl Compactor {
         groups
     }
 
+    fn group_small_contiguous_groups_2(
+        mut file_groups: Vec<GroupWithMinTimeAndSize2>,
+        compaction_max_size_bytes: i64,
+        // TODO; remove the config param for this
+        // compaction_max_file_count: i64,
+    ) -> CompactAndSplit {// Vec<Vec<ParquetFile>> {
+        let mut compact_and_split =  CompactAndSplit::new(file_groups.len());
+
+        if file_groups.is_empty() {
+            return compact_and_split;
+        }
+
+        for g in file_groups {
+            if g.total_file_size_bytes <= compaction_max_size_bytes {
+                compact_and_split.add_compact_group(g.parquet_files);
+            } else {
+                compact_and_split.add_split_groups(g.parquet_files);
+            }
+        }
+
+
+        // TODO: open ticket to turn this on
+        // // Sort the groups by their min_time
+        // file_groups.sort_by_key(|a| a.min_time);
+
+        // let mut current_group = vec![];
+        // let mut current_size = 0;
+        // let mut current_num_files = 0;
+        // for g in file_groups {
+        //     if  current_size + g.total_file_size_bytes <= compaction_max_size_bytes
+        //     {
+        //         // Group this one with the current_group
+        //         current_num_files += g.parquet_files.len();
+        //         current_group.extend(g.parquet_files);
+        //         current_size += g.total_file_size_bytes;
+        //     } else {
+        //         // Current group cannot be combined with its next one
+        //         if !current_group.is_empty() {
+        //             if current_size <= compaction_max_size_bytes {
+        //                 compact_and_split.add_compact_group(current_group);
+        //             } else {
+        //                 compact_and_split.add_split_groups(current_group);
+        //             }
+        //         }
+
+        //         // Create new current group
+        //         current_num_files = g.parquet_files.len();
+        //         current_group = g.parquet_files;
+        //         current_size = g.total_file_size_bytes;
+        //     }
+        // }
+
+        // // push the last one
+        // if current_size <= compaction_max_size_bytes {
+        //     compact_and_split.add_compact_group(current_group);
+        // } else {
+        //     compact_and_split.add_split_groups(current_group);
+        // }
+
+        compact_and_split
+    }
+
     fn union_tombstones(
         mut tombstones: BTreeMap<TombstoneId, Tombstone>,
         group_with_tombstones: &GroupWithTombstones,
@@ -781,10 +962,7 @@ impl Compactor {
     }
 
     // Compact given files. The given files are either overlapped or contiguous in time.
-    // The output will include 2 CompactedData sets, one contains a large amount of data of
-    // least recent time and the other has a small amount of data of most recent time. Each
-    // will be persisted in its own file. The idea is when new writes come, they will
-    // mostly overlap with the most recent data only.
+    // The output will include one or many files, each is estimated smaller than max_desired_file_size
     async fn compact(
         &self,
         overlapped_files: Vec<ParquetFileWithTombstone>,
@@ -905,7 +1083,6 @@ impl Compactor {
 
         // Build compact logical plan
         let plan = {
-            // split data to compact data into 2 files
             if split_times.len() == 1 && split_times[0] == max_time {
                 // compact everything into one file
                 ReorgPlanner::new()
@@ -1140,29 +1317,48 @@ impl Compactor {
         Ok(overlapped_groups)
     }
 
-    fn split_content_of_large_overlapped_groups(
-        groups: &mut Vec<Vec<ParquetFile>>,
-        max_desired_file_size_bytes: i64,
-        ) -> OverlappedGroupAndSplitFiles {
+    // // Put small and large group into different buckets
+    // fn classify_group_size(
+    //     groups: Vec<Vec<ParquetFile>>,
+    //     max_compaction_size_bytes: i64,
+    //     ) -> Result<OverlappedSizeGroups> {
 
-        let mut overlapped_groups = OverlappedGroups::new(groups.len() * 2);
-        let mut overlaps_and_split = OverlappedGroupAndSplitFiles::new()
+    //     let mut overlapped_groups = OverlappedSizeGroups::new(groups.len());
 
-        for group in groups {
-            let total_size_bytes: i64 = group.iter().map(|f| f.file_size_bytes).sum();
-            if total_size_bytes <= max_desired_file_size_bytes
-            {
-                overlaps_and_split.add_overalapped_group(group.to_vec());
-            } else {
+    //     for group in groups {
 
-                // This group are too learge, we need to split the files content into smaller non-overlapped groups
-                // overlaps_and_split.add_split_files(files)
-            }
-        }
+            // // Sannity check to ensure no there are no overlaps in bot time and sequence numbers
+            // //
+            // // Sort overlapped files on their min sequence number to ensure their split subgroups
+            // // contain contiguous sequnce numbers
+            // group.sort_by_key(|f| f.min_sequence_number);
+            // //
+            // // Verify that the sorted ranges of [min_sequence_number, max_sequence_number] do not
+            // // overlap if their time ranges overlap
+            // // Note that: `https://github.com/influxdata/conductor/issues/1009`
+            // //  1. the input groups includes time-overlaped files but 2 files in them may NOT overlap but
+            // //     both overlap with a third file
+            // //  2. Since we split large compacted result into many files in previous cycles, files
+            // //     in this cycle can have exact same range of sequence numbers
+            // // Points 1 and 2 together will lead to many non-time-overlapped files with same sequence number ranges
+            // // can end up in the same time-overlapped group
+            // for i in 1..group.len() {
+            //     Self::verify_contiguous_files(&group[i - 1], &group[i])?
+            // }
 
-        overlaps_and_split
+    //         // calssify the group size
+    //         let total_size_bytes: i64 = group.iter().map(|f| f.file_size_bytes).sum();
+    //         if total_size_bytes <= max_compaction_size_bytes
+    //         {
+    //             overlapped_groups.add_small_group(group);
+    //         } else {
+    //             overlapped_groups.add_large_groups(group);
+    //         }
+    //     }
+
+    //     overlapped_groups
        
-    }
+    // }
 
     // Panic if the two given time are both time-overlapped and sequence-number-overlapped
     //  . file_1 and file_2 must belong to the same partition
@@ -1208,6 +1404,48 @@ impl Compactor {
             Self::split_overlapped_groups(&mut overlapped_groups, max_size_bytes, max_file_count)?;
 
         Ok(overlapped_groups.groups_with_min_time_and_size())
+    }
+
+    // Given a list of parquet files that come from the same Table Partition, group files together
+    // if their (min_time, max_time) ranges overlap. Does not preserve or guarantee any ordering.
+    // The groups will be marked small or large for further process
+    fn overlapped_groups_2(
+        parquet_files: Vec<ParquetFile>,
+        compaction_max_size_bytes: i64,
+    ) -> Result<Vec<GroupWithMinTimeAndSize2>> {
+        // group overlap files
+        let mut overlapped_groups =
+            group_potential_duplicates(parquet_files).expect("Error grouping overlapped chunks");
+
+        let groups = overlapped_groups
+            .iter()
+            .map(|group| {
+
+                // Sannity check to ensure no there are no overlaps in bot time and sequence numbers
+                //
+                // Sort overlapped files on their min sequence number to ensure their split subgroups
+                // contain contiguous sequnce numbers
+                group.sort_by_key(|f| f.min_sequence_number);
+                //
+                // Verify that the sorted ranges of [min_sequence_number, max_sequence_number] do not
+                // overlap if their time ranges overlap
+                // Note that: `https://github.com/influxdata/conductor/issues/1009`
+                //  1. the input groups includes time-overlaped files but 2 files in them may NOT overlap but
+                //     both overlap with a third file
+                //  2. Since we split large compacted result into many files in previous cycles, files
+                //     in this cycle can have exact same range of sequence numbers
+                // Points 1 and 2 together will lead to many non-time-overlapped files with same sequence number ranges
+                // can end up in the same time-overlapped group
+                for i in 1..group.len() {
+                    Self::verify_contiguous_files(&group[i - 1], &group[i])?;
+                }
+
+                // map
+                Ok(GroupWithMinTimeAndSize2::new(*group))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(groups)
     }
 
 
@@ -1425,40 +1663,72 @@ impl Compactor {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct OverlappedGroupAndSplitFiles {
-    // Groups that contain overlapped files but the groups do not overlapp
-    // with other groups
-    overlapped_groups: Vec<Vec<ParquetFile>>,
-
-    // Files that need to get split 
-    split_files: Vec<SplitFile>,
+struct CompactAndSplit {
+    // overlapped groups that are smaller than a speciffied size
+    // and will be compacted
+    compact_groups: Vec<Vec<ParquetFile>>,
+    // overlapped groups that are larger than a speciffied size
+    // and their file contant will be split
+    split_groups: Vec<Vec<ParquetFile>>,
 }
 
-impl OverlappedGroupAndSplitFiles {
-    pub fn new() -> Self {
+impl CompactAndSplit {
+    pub fn new(len: usize) -> Self {
         Self {
-            overlapped_groups: vec![],
-            split_files: vec![]
+            compact_groups: Vec::with_capacity(len),
+            split_groups: Vec::with_capacity(len)
         }
     }
 
-    pub fn add_overalapped_group(&mut self, group: Vec<ParquetFile>) {
-        self.overlapped_groups.push(group);
+    pub fn add_compact_group(&mut self, group: Vec<ParquetFile>) {
+        self.compact_groups.push(group);
     }
 
-    pub fn add_split_files(&mut self, files: &mut Vec<SplitFile>) {
-        self.split_files.append(files);
+    pub fn add_split_groups(&mut self, group: Vec<ParquetFile>) {
+        self.split_groups.push(group);
     }
 }
 
+// #[derive(Debug, Clone, PartialEq)]
+// struct OverlappedSizeGroups {
+//     // overlapped groups that are smaller than a speciffied size
+//     small_groups: Vec<Vec<ParquetFile>>,
+//     // overlapped groups that are smaller than a speciffied size
+//     large_groups: Vec<Vec<ParquetFile>>,
+// }
 
-#[derive(Debug, Clone, PartialEq)]
-struct SplitFile {
-    parquet_file: ParquetFile,
-    // Times at which the prquet_file will get split
-    // Al the times in this vector must be in the time range of the parquet_file
-    split_time: Vec<i64>,
-}
+// impl OverlappedSizeGroups {
+//     pub fn new(len: usize) -> Self {
+//         Self {
+//             small_groups: Vec::with_capacity(len),
+//             large_groups: Vec::with_capacity(len)
+//         }
+//     }
+
+//     pub fn add_small_group(&mut self, group: Vec<ParquetFile>) {
+//         self.small_groups.push(group);
+//     }
+
+//     pub fn add_large_groups(&mut self, group: Vec<ParquetFile>) {
+//         self.large_groups.push(group);
+//     }
+
+//     pub fn groups_with_min_time_and_size(self) -> Vec<GroupWithMinTimeAndSize> {
+//         let mut groups = Vec::with_capacity(
+//             self.small_groups.len() + self.large_groups.len(),
+//         );
+
+//         for group in self.small_groups {
+//             groups.push(GroupWithMinTimeAndSize::new(group, false));
+//         }
+//         for group in self.large_groups {
+//             groups.push(GroupWithMinTimeAndSize::new(group, true));
+//         }
+
+//         groups
+//     }
+// }
+
 // TODO: remove this truct
 #[derive(Debug, Clone, PartialEq)]
 struct OverlappedGroups {
@@ -3456,7 +3726,7 @@ mod tests {
         let pf6 = arbitrary_parquet_file_with_size_and_sequence_number(55, 65, 6, 6, 200);
         let pf7 = arbitrary_parquet_file_with_size_and_sequence_number(10, 20, 7, 7, 200);
 
-        // 6 files in in 5 groups
+        // 6 files in 5 groups
         let g1 = GroupWithMinTimeAndSize::new(vec![pf1.clone(), pf2.clone()], false);
         let g2 = GroupWithMinTimeAndSize::new(vec![pf4.clone()], false);
         let g3 = GroupWithMinTimeAndSize::new(vec![pf5.clone()], true);
@@ -3961,7 +4231,7 @@ mod tests {
             partition_key: "somehour".into(),
             min_sequence_number: SequenceNumber::new(5),
             max_sequence_number: SequenceNumber::new(6),
-            // TODO: cpnsider to add level-1 tests before merging
+            // TODO: consider to add level-1 tests before merging
             compaction_level: FILE_NON_OVERLAPPED_COMAPCTION_LEVEL,
             sort_key: None,
         };
