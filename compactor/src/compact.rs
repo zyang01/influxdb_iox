@@ -1022,6 +1022,8 @@ impl Compactor {
     //     actual deduplication work
     //   . We do want to compact/concat small continuous non-overlapped chunks (in later steps) so
     //     this can be considered as a part of that optimization
+    //
+    // TODO: remove this function
     fn split_overlapped_groups(
         groups: &mut Vec<Vec<ParquetFile>>,
         max_size_bytes: i64,
@@ -1084,6 +1086,30 @@ impl Compactor {
         Ok(overlapped_groups)
     }
 
+    fn split_content_of_large_overlapped_groups(
+        groups: &mut Vec<Vec<ParquetFile>>,
+        max_desired_file_size_bytes: i64,
+        ) -> OverlappedGroupAndSplitFiles {
+
+        let mut overlapped_groups = OverlappedGroups::new(groups.len() * 2);
+        let mut overlaps_and_split = OverlappedGroupAndSplitFiles::new()
+
+        for group in groups {
+            let total_size_bytes: i64 = group.iter().map(|f| f.file_size_bytes).sum();
+            if total_size_bytes <= max_desired_file_size_bytes
+            {
+                overlaps_and_split.add_overalapped_group(group.to_vec());
+            } else {
+
+                // This group are too learge, we need to split the files content into smaller non-overlapped groups
+                // overlaps_and_split.add_split_files(files)
+            }
+        }
+
+        overlaps_and_split
+       
+    }
+
     // Panic if the two given time are both time-overlapped and sequence-number-overlapped
     //  . file_1 and file_2 must belong to the same partition
     //  . file_1 must have range sequence number <= file_s' range sequence number
@@ -1129,6 +1155,8 @@ impl Compactor {
 
         Ok(overlapped_groups.groups_with_min_time_and_size())
     }
+
+
 
     // Compute time to split data
     // Return a list of times at which we want data to be split. The times are computed
@@ -1342,6 +1370,42 @@ impl Compactor {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct OverlappedGroupAndSplitFiles {
+    // Groups that contain overlapped files but the groups do not overlapp
+    // with other groups
+    overlapped_groups: Vec<Vec<ParquetFile>>,
+
+    // Files that need to get split 
+    split_files: Vec<SplitFile>,
+}
+
+impl OverlappedGroupAndSplitFiles {
+    pub fn new() -> Self {
+        Self {
+            overlapped_groups: vec![],
+            split_files: vec![]
+        }
+    }
+
+    pub fn add_overalapped_group(&mut self, group: Vec<ParquetFile>) {
+        self.overlapped_groups.push(group);
+    }
+
+    pub fn add_split_files(&mut self, files: &mut Vec<SplitFile>) {
+        self.split_files.append(files);
+    }
+}
+
+
+#[derive(Debug, Clone, PartialEq)]
+struct SplitFile {
+    parquet_file: ParquetFile,
+    // Times at which the prquet_file will get split
+    // Al the times in this vector must be in the time range of the parquet_file
+    split_time: Vec<i64>,
+}
+// TODO: remove this truct
 #[derive(Debug, Clone, PartialEq)]
 struct OverlappedGroups {
     // Groups that contain overlapped files but the groups do not overlapp
@@ -2506,7 +2570,7 @@ mod tests {
 
         // Vector of chunks
         let chunks = vec![pc2, pc1];
-        // must same order/min_sequnce_number
+        // must same order/min_sequence_number
         assert_eq!(chunks[0].order(), chunks[1].order());
         // different chunk ids
         assert!(chunks[0].id() != chunks[1].id());
