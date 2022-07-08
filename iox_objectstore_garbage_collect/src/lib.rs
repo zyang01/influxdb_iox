@@ -28,7 +28,6 @@ use observability_deps::tracing::*;
 use snafu::prelude::*;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use trogging::cli::LoggingConfig;
 
 /// Logic for checking if a file in object storage should be deleted or not.
 pub mod checker;
@@ -75,10 +74,6 @@ pub struct Config {
 
     #[clap(flatten)]
     catalog_dsn: CatalogDsnConfig,
-
-    /// logging options
-    #[clap(flatten)]
-    pub(crate) logging_config: LoggingConfig,
 
     /// If this flag is specified, don't delete the files in object storage. Only print the files
     /// that would be deleted if this flag wasn't specified.

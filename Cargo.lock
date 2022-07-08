@@ -2335,7 +2335,6 @@ dependencies = [
  "snafu",
  "tempfile",
  "tokio",
- "trogging",
  "uuid 1.1.2",
 ]
 
