@@ -213,7 +213,8 @@ impl WriteBufferStreamHandler for RSKafkaStreamHandler {
 
         let sequencer_id = self.sequencer_id;
 
-        // Use buffered streams to pipeline the reading of a message from kafka from with its decoding.
+        // Use buffered streams to read and decode messages from the
+        // kafka stream in parallel, if possible.
         //
         // ┌─────┬──────┬──────┬─────┬──────┬──────┬─────┬──────┬──────┐
         // │ Read│ Read │ Read │ Read│ Read │ Read │ Read│ Read │ Read │
