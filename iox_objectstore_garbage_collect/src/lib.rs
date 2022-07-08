@@ -131,7 +131,8 @@ pub enum Error {
     DeleterPanic { source: tokio::task::JoinError },
 }
 
-type Result<T, E = Error> = std::result::Result<T, E>;
+#[allow(missing_docs)]
+pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[cfg(test)]
 mod tests {
