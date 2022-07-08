@@ -18,10 +18,6 @@
 use chrono::{DateTime, Utc};
 use chrono_english::{parse_date_string, Dialect};
 use clap::Parser;
-use clap_blocks::{
-    catalog_dsn::CatalogDsnConfig,
-    object_store::{make_object_store, ObjectStoreConfig},
-};
 use iox_catalog::interface::Catalog;
 use object_store::DynObjectStore;
 use observability_deps::tracing::*;
@@ -40,13 +36,16 @@ const BATCH_SIZE: usize = 1000;
 
 /// Run the tasks that clean up old object store files that don't appear in the catalog.
 pub async fn main(config: Config) -> Result<()> {
-    let object_store = config.object_store()?;
-    let catalog = config.catalog().await?;
+    let Config {
+        object_store,
+        sub_config,
+        catalog,
+    } = config;
 
-    let dry_run = config.dry_run;
-    let cutoff = config.cutoff()?;
+    let dry_run = sub_config.dry_run;
+    let cutoff = sub_config.cutoff()?;
     info!(
-        cutoff_arg = %config.cutoff,
+        cutoff_arg = %sub_config.cutoff,
         cutoff_parsed = %cutoff,
     );
 
@@ -66,15 +65,22 @@ pub async fn main(config: Config) -> Result<()> {
     Ok(())
 }
 
-/// Clean up old object store files that don't appear in the catalog.
-#[derive(Debug, Parser)]
+/// Configuration to run the object store garbage collector
+#[derive(Debug)]
 pub struct Config {
-    #[clap(flatten)]
-    object_store: ObjectStoreConfig,
+    /// The object store to garbage collect
+    pub object_store: Arc<DynObjectStore>,
 
-    #[clap(flatten)]
-    catalog_dsn: CatalogDsnConfig,
+    /// The catalog to check if an object is garbage
+    pub catalog: Arc<dyn Catalog>,
 
+    /// The garbage collector specific configuration
+    pub sub_config: SubConfig,
+}
+
+/// Configuration specific to the object store garbage collector
+#[derive(Debug, Parser)]
+pub struct SubConfig {
     /// If this flag is specified, don't delete the files in object storage. Only print the files
     /// that would be deleted if this flag wasn't specified.
     #[clap(long)]
@@ -89,20 +95,7 @@ pub struct Config {
     cutoff: String,
 }
 
-impl Config {
-    fn object_store(&self) -> Result<Arc<DynObjectStore>> {
-        make_object_store(&self.object_store).context(CreatingObjectStoreSnafu)
-    }
-
-    async fn catalog(&self) -> Result<Arc<dyn Catalog>> {
-        let metrics = metric::Registry::default().into();
-
-        self.catalog_dsn
-            .get_catalog("iox_objectstore_garbage_collect", metrics)
-            .await
-            .context(CreatingCatalogSnafu)
-    }
-
+impl SubConfig {
     fn cutoff(&self) -> Result<DateTime<Utc>> {
         let argument = &self.cutoff;
         parse_date_string(argument, Utc::now(), Dialect::Us)
@@ -113,16 +106,6 @@ impl Config {
 #[derive(Debug, Snafu)]
 #[allow(missing_docs)]
 pub enum Error {
-    #[snafu(display("Could not create the object store"))]
-    CreatingObjectStore {
-        source: clap_blocks::object_store::ParseError,
-    },
-
-    #[snafu(display("Could not create the catalog"))]
-    CreatingCatalog {
-        source: clap_blocks::catalog_dsn::Error,
-    },
-
     #[snafu(display(r#"Could not parse the cutoff "{argument}""#))]
     ParsingCutoff {
         source: chrono_english::DateError,
@@ -152,8 +135,12 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[cfg(test)]
 mod tests {
+    use clap_blocks::{
+        catalog_dsn::CatalogDsnConfig,
+        object_store::{make_object_store, ObjectStoreConfig},
+    };
     use filetime::FileTime;
-    use std::{fs, path::PathBuf};
+    use std::{fs, iter, path::PathBuf};
     use tempfile::TempDir;
 
     use super::*;
@@ -162,13 +149,7 @@ mod tests {
     async fn deletes_untracked_files_older_than_the_cutoff() {
         let setup = OldFileSetup::new();
 
-        #[rustfmt::skip]
-        let config = Config::parse_from([
-            "dummy-program-name",
-            "--object-store", "file",
-            "--data-dir", setup.data_dir_arg(),
-            "--catalog", "memory",
-        ]);
+        let config = build_config(setup.data_dir_arg(), []).await;
         main(config).await.unwrap();
 
         assert!(
@@ -183,13 +164,9 @@ mod tests {
         let setup = OldFileSetup::new();
 
         #[rustfmt::skip]
-        let config = Config::parse_from([
-            "dummy-program-name",
-            "--object-store", "file",
-            "--data-dir", setup.data_dir_arg(),
-            "--catalog", "memory",
+        let config = build_config(setup.data_dir_arg(), [
             "--cutoff", "10 years ago",
-        ]);
+        ]).await;
         main(config).await.unwrap();
 
         assert!(
@@ -197,6 +174,42 @@ mod tests {
             "The path {} should not have been deleted",
             setup.file_path.as_path().display(),
         );
+    }
+
+    async fn build_config(data_dir: &str, args: impl IntoIterator<Item = &str> + Send) -> Config {
+        let sub_config = SubConfig::parse_from(iter::once("dummy-program-name").chain(args));
+        let object_store = object_store(data_dir);
+        let catalog = catalog().await;
+
+        Config {
+            object_store,
+            catalog,
+            sub_config,
+        }
+    }
+
+    fn object_store(data_dir: &str) -> Arc<DynObjectStore> {
+        #[rustfmt::skip]
+        let cfg = ObjectStoreConfig::parse_from([
+            "dummy-program-name",
+            "--object-store", "file",
+            "--data-dir", data_dir,
+        ]);
+        make_object_store(&cfg).unwrap()
+    }
+
+    async fn catalog() -> Arc<dyn Catalog> {
+        #[rustfmt::skip]
+        let cfg = CatalogDsnConfig::parse_from([
+            "dummy-program-name",
+            "--catalog", "memory",
+        ]);
+
+        let metrics = metric::Registry::default().into();
+
+        cfg.get_catalog("iox_objectstore_garbage_collect", metrics)
+            .await
+            .unwrap()
     }
 
     struct OldFileSetup {
