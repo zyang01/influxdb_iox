@@ -26,11 +26,11 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 /// Logic for checking if a file in object storage should be deleted or not.
-pub mod checker;
+mod checker;
 /// Logic for deleting a file from object storage.
-pub mod deleter;
+mod deleter;
 /// Logic for listing all files in object storage.
-pub mod lister;
+mod lister;
 
 const BATCH_SIZE: usize = 1000;
 
