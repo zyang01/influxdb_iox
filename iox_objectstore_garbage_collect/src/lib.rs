@@ -23,7 +23,7 @@ use object_store::DynObjectStore;
 use observability_deps::tracing::*;
 use snafu::prelude::*;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 
 /// Logic for checking if a file in object storage should be deleted or not.
 mod checker;
@@ -36,33 +36,76 @@ const BATCH_SIZE: usize = 1000;
 
 /// Run the tasks that clean up old object store files that don't appear in the catalog.
 pub async fn main(config: Config) -> Result<()> {
-    let Config {
-        object_store,
-        sub_config,
-        catalog,
-    } = config;
+    GarbageCollector::start(config)?.join().await
+}
 
-    let dry_run = sub_config.dry_run;
-    let cutoff = sub_config.cutoff()?;
-    info!(
-        cutoff_arg = %sub_config.cutoff,
-        cutoff_parsed = %cutoff,
-    );
+/// The tasks that clean up old object store files that don't appear in the catalog.
+#[derive(Debug)]
+pub struct GarbageCollector {
+    shutdown_tx: broadcast::Sender<()>,
+    lister: tokio::task::JoinHandle<Result<(), lister::Error>>,
+    checker: tokio::task::JoinHandle<Result<(), checker::Error>>,
+    deleter: tokio::task::JoinHandle<Result<(), deleter::Error>>,
+}
 
-    let (tx1, rx1) = mpsc::channel(BATCH_SIZE);
-    let (tx2, rx2) = mpsc::channel(BATCH_SIZE);
+impl GarbageCollector {
+    /// Construct the garbage collector and start it
+    pub fn start(config: Config) -> Result<Self> {
+        let Config {
+            object_store,
+            sub_config,
+            catalog,
+        } = config;
 
-    let lister = tokio::spawn(lister::perform(Arc::clone(&object_store), tx1));
-    let checker = tokio::spawn(checker::perform(catalog, cutoff, rx1, tx2));
-    let deleter = tokio::spawn(deleter::perform(object_store, dry_run, rx2));
+        let dry_run = sub_config.dry_run;
+        let cutoff = sub_config.cutoff()?;
+        info!(
+            cutoff_arg = %sub_config.cutoff,
+            cutoff_parsed = %cutoff,
+        );
 
-    let (lister, checker, deleter) = futures::join!(lister, checker, deleter);
+        let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
 
-    deleter.context(DeleterPanicSnafu)??;
-    checker.context(CheckerPanicSnafu)??;
-    lister.context(ListerPanicSnafu)??;
+        let (tx1, rx1) = mpsc::channel(BATCH_SIZE);
+        let (tx2, rx2) = mpsc::channel(BATCH_SIZE);
 
-    Ok(())
+        let lister = tokio::spawn(lister::perform(shutdown_rx, Arc::clone(&object_store), tx1));
+        let checker = tokio::spawn(checker::perform(catalog, cutoff, rx1, tx2));
+        let deleter = tokio::spawn(deleter::perform(object_store, dry_run, rx2));
+
+        Ok(Self {
+            shutdown_tx,
+            lister,
+            checker,
+            deleter,
+        })
+    }
+
+    /// A handle to gracefully shutdown the garbage collector when invoked
+    pub fn shutdown_handle(&self) -> impl Fn() {
+        let shutdown_tx = self.shutdown_tx.clone();
+        move || {
+            shutdown_tx.send(()).ok();
+        }
+    }
+
+    /// Wait for the garbage collector to finish work
+    pub async fn join(self) -> Result<()> {
+        let Self {
+            lister,
+            checker,
+            deleter,
+            ..
+        } = self;
+
+        let (lister, checker, deleter) = futures::join!(lister, checker, deleter);
+
+        deleter.context(DeleterPanicSnafu)??;
+        checker.context(CheckerPanicSnafu)??;
+        lister.context(ListerPanicSnafu)??;
+
+        Ok(())
+    }
 }
 
 /// Configuration to run the object store garbage collector
