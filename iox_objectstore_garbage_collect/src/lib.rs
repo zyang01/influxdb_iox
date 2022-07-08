@@ -109,7 +109,7 @@ impl GarbageCollector {
 }
 
 /// Configuration to run the object store garbage collector
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Config {
     /// The object store to garbage collect
     pub object_store: Arc<DynObjectStore>,
@@ -122,7 +122,7 @@ pub struct Config {
 }
 
 /// Configuration specific to the object store garbage collector
-#[derive(Debug, Parser)]
+#[derive(Debug, Clone, Parser)]
 pub struct SubConfig {
     /// If this flag is specified, don't delete the files in object storage. Only print the files
     /// that would be deleted if this flag wasn't specified.
