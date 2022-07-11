@@ -392,6 +392,22 @@ impl WriteBufferReading for RSKafkaConsumer {
     }
 }
 
+/// Create a new kafka client
+async fn kafka_client(
+    conn: impl Into<String>,
+    client_config: &ClientConfig,
+) -> Result<rskafka::client::Client> {
+    let mut client_builder = ClientBuilder::new(vec![conn.into()]);
+    if let Some(max_message_size) = client_config.max_message_size {
+        client_builder = client_builder.max_message_size(max_message_size);
+    }
+    if let Some(sock5_proxy) = client_config.socks5_proxy.as_ref() {
+        client_builder = client_builder.socks5_proxy(sock5_proxy.to_string());
+    }
+    let client = client_builder.build().await?;
+    Ok(client)
+}
+
 async fn setup_topic(
     conn: String,
     database_name: String,
@@ -399,14 +415,7 @@ async fn setup_topic(
     creation_config: Option<&WriteBufferCreationConfig>,
 ) -> Result<BTreeMap<u32, PartitionClient>> {
     let client_config = ClientConfig::try_from(connection_config)?;
-    let mut client_builder = ClientBuilder::new(vec![conn]);
-    if let Some(max_message_size) = client_config.max_message_size {
-        client_builder = client_builder.max_message_size(max_message_size);
-    }
-    if let Some(sock5_proxy) = client_config.socks5_proxy {
-        client_builder = client_builder.socks5_proxy(sock5_proxy);
-    }
-    let client = client_builder.build().await?;
+    let client = kafka_client(&conn, &client_config).await?;
     let controller_client = client.controller_client()?;
 
     loop {
@@ -415,7 +424,11 @@ async fn setup_topic(
         if let Some(topic) = topics.into_iter().find(|t| t.name == database_name) {
             let mut partition_clients = BTreeMap::new();
             for partition in topic.partitions {
-                let c = client.partition_client(&database_name, partition)?;
+                // create an entirely new connection for this
+                // partition (so we can multiplex reading through multiple connections)
+                let c = kafka_client(&conn, &client_config)
+                    .await?
+                    .partition_client(&database_name, partition)?;
                 let partition = u32::try_from(partition).map_err(WriteBufferError::invalid_data)?;
                 partition_clients.insert(partition, c);
             }
