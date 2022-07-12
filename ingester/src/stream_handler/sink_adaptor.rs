@@ -33,9 +33,12 @@ impl IngestSinkAdaptor {
 
 #[async_trait]
 impl DmlSink for IngestSinkAdaptor {
-    async fn apply(&self, op: DmlOperation) -> Result<bool, crate::data::Error> {
-        self.ingest_data
-            .buffer_operation(self.sequencer_id, op, &self.lifecycle_handle)
-            .await
+    async fn apply(&self, _op: DmlOperation) -> Result<bool, crate::data::Error> {
+        // Simply ignore the operation
+        Ok(false)
+
+        // self.ingest_data
+        //     .buffer_operation(self.sequencer_id, op, &self.lifecycle_handle)
+        //     .await
     }
 }
