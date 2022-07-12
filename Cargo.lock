@@ -120,12 +120,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "arrow"
+version = "18.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5f89d2bc04fa746ee395d20c4cbfa508e4cce5c00bae816f0fae434fcfb9853"
+dependencies = [
+ "ahash",
+ "bitflags",
+ "chrono",
+ "comfy-table",
+ "csv",
+ "flatbuffers",
+ "half 2.0.0",
+ "hashbrown",
+ "hex",
+ "indexmap",
+ "lazy_static",
+ "lexical-core",
+ "multiversion",
+ "num",
+ "rand",
+ "regex",
+ "serde",
+ "serde_derive",
+ "serde_json",
+]
+
+[[package]]
 name = "arrow-flight"
 version = "17.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d3a1f1484ac9d752de1362ad82440b0b978dc0cd1c19a7d8457a6d984a35deb"
 dependencies = [
- "arrow",
+ "arrow 17.0.0",
  "base64 0.13.0",
  "bytes",
  "futures",
@@ -142,7 +169,7 @@ name = "arrow_util"
 version = "0.1.0"
 dependencies = [
  "ahash",
- "arrow",
+ "arrow 18.0.0",
  "arrow-flight",
  "chrono",
  "comfy-table",
@@ -813,7 +840,7 @@ dependencies = [
 name = "compactor"
 version = "0.1.0"
 dependencies = [
- "arrow",
+ "arrow 18.0.0",
  "arrow_util",
  "async-trait",
  "backoff",
@@ -1148,7 +1175,7 @@ version = "9.0.0"
 source = "git+https://github.com/apache/arrow-datafusion.git?rev=85ca8be669dc1fbba4b2eefbf99fc2ed1546cc0c#85ca8be669dc1fbba4b2eefbf99fc2ed1546cc0c"
 dependencies = [
  "ahash",
- "arrow",
+ "arrow 17.0.0",
  "async-trait",
  "chrono",
  "datafusion-common",
@@ -1185,7 +1212,7 @@ name = "datafusion-common"
 version = "9.0.0"
 source = "git+https://github.com/apache/arrow-datafusion.git?rev=85ca8be669dc1fbba4b2eefbf99fc2ed1546cc0c#85ca8be669dc1fbba4b2eefbf99fc2ed1546cc0c"
 dependencies = [
- "arrow",
+ "arrow 17.0.0",
  "ordered-float 3.0.0",
  "parquet",
  "sqlparser",
@@ -1210,7 +1237,7 @@ version = "9.0.0"
 source = "git+https://github.com/apache/arrow-datafusion.git?rev=85ca8be669dc1fbba4b2eefbf99fc2ed1546cc0c#85ca8be669dc1fbba4b2eefbf99fc2ed1546cc0c"
 dependencies = [
  "ahash",
- "arrow",
+ "arrow 17.0.0",
  "datafusion-common",
  "sqlparser",
 ]
@@ -1220,7 +1247,7 @@ name = "datafusion-optimizer"
 version = "9.0.0"
 source = "git+https://github.com/apache/arrow-datafusion.git?rev=85ca8be669dc1fbba4b2eefbf99fc2ed1546cc0c#85ca8be669dc1fbba4b2eefbf99fc2ed1546cc0c"
 dependencies = [
- "arrow",
+ "arrow 17.0.0",
  "async-trait",
  "chrono",
  "datafusion-common",
@@ -1236,7 +1263,7 @@ version = "9.0.0"
 source = "git+https://github.com/apache/arrow-datafusion.git?rev=85ca8be669dc1fbba4b2eefbf99fc2ed1546cc0c#85ca8be669dc1fbba4b2eefbf99fc2ed1546cc0c"
 dependencies = [
  "ahash",
- "arrow",
+ "arrow 17.0.0",
  "blake2",
  "blake3",
  "chrono",
@@ -1259,7 +1286,7 @@ name = "datafusion-proto"
 version = "9.0.0"
 source = "git+https://github.com/apache/arrow-datafusion.git?rev=85ca8be669dc1fbba4b2eefbf99fc2ed1546cc0c#85ca8be669dc1fbba4b2eefbf99fc2ed1546cc0c"
 dependencies = [
- "arrow",
+ "arrow 17.0.0",
  "datafusion 9.0.0",
  "datafusion-common",
  "datafusion-expr",
@@ -1272,7 +1299,7 @@ name = "datafusion-row"
 version = "9.0.0"
 source = "git+https://github.com/apache/arrow-datafusion.git?rev=85ca8be669dc1fbba4b2eefbf99fc2ed1546cc0c#85ca8be669dc1fbba4b2eefbf99fc2ed1546cc0c"
 dependencies = [
- "arrow",
+ "arrow 17.0.0",
  "datafusion-common",
  "paste",
  "rand",
@@ -1284,7 +1311,7 @@ version = "9.0.0"
 source = "git+https://github.com/apache/arrow-datafusion.git?rev=85ca8be669dc1fbba4b2eefbf99fc2ed1546cc0c#85ca8be669dc1fbba4b2eefbf99fc2ed1546cc0c"
 dependencies = [
  "ahash",
- "arrow",
+ "arrow 17.0.0",
  "datafusion-common",
  "datafusion-expr",
  "hashbrown",
@@ -2081,7 +2108,7 @@ name = "influxdb_iox"
 version = "0.1.0"
 dependencies = [
  "ansi_term",
- "arrow",
+ "arrow 18.0.0",
  "arrow_util",
  "assert_cmd",
  "backtrace",
@@ -2147,7 +2174,7 @@ dependencies = [
 name = "influxdb_iox_client"
 version = "0.1.0"
 dependencies = [
- "arrow",
+ "arrow 18.0.0",
  "arrow-flight",
  "arrow_util",
  "bytes",
@@ -2217,7 +2244,7 @@ dependencies = [
 name = "ingester"
 version = "0.1.0"
 dependencies = [
- "arrow",
+ "arrow 18.0.0",
  "arrow-flight",
  "arrow_util",
  "assert_matches",
@@ -2373,7 +2400,7 @@ dependencies = [
 name = "iox_query"
 version = "0.1.0"
 dependencies = [
- "arrow",
+ "arrow 18.0.0",
  "arrow_util",
  "async-trait",
  "chrono",
@@ -2402,7 +2429,7 @@ dependencies = [
 name = "iox_tests"
 version = "0.1.0"
 dependencies = [
- "arrow",
+ "arrow 18.0.0",
  "bytes",
  "data_types",
  "datafusion 0.1.0",
@@ -2981,7 +3008,7 @@ dependencies = [
 name = "mutable_batch"
 version = "0.1.0"
 dependencies = [
- "arrow",
+ "arrow 18.0.0",
  "arrow_util",
  "chrono",
  "data_types",
@@ -3366,7 +3393,7 @@ dependencies = [
 name = "packers"
 version = "0.1.0"
 dependencies = [
- "arrow",
+ "arrow 18.0.0",
  "criterion",
  "influxdb_tsm",
  "parquet",
@@ -3439,7 +3466,7 @@ version = "17.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "367d46126e60d229e9e47e3d793c622a18c0e60a749573b7936bf3b0701cb8a3"
 dependencies = [
- "arrow",
+ "arrow 17.0.0",
  "base64 0.13.0",
  "brotli",
  "byteorder",
@@ -3469,7 +3496,7 @@ dependencies = [
 name = "parquet_file"
 version = "0.1.0"
 dependencies = [
- "arrow",
+ "arrow 18.0.0",
  "base64 0.13.0",
  "bytes",
  "data_types",
@@ -3725,7 +3752,7 @@ checksum = "eb9f9e6e233e5c4a35559a617bf40a4ec447db2e84c20b55a6f83167b7e57872"
 name = "predicate"
 version = "0.1.0"
 dependencies = [
- "arrow",
+ "arrow 18.0.0",
  "chrono",
  "data_types",
  "datafusion 0.1.0",
@@ -3922,7 +3949,7 @@ checksum = "cf7e6d18738ecd0902d30d1ad232c9125985a3422929b16c65517b38adc14f96"
 name = "querier"
 version = "0.1.0"
 dependencies = [
- "arrow",
+ "arrow 18.0.0",
  "arrow_util",
  "assert_matches",
  "async-trait",
@@ -3969,7 +3996,7 @@ dependencies = [
 name = "query_functions"
 version = "0.1.0"
 dependencies = [
- "arrow",
+ "arrow 18.0.0",
  "chrono",
  "datafusion 0.1.0",
  "datafusion_util",
@@ -3988,7 +4015,7 @@ dependencies = [
 name = "query_tests"
 version = "0.1.0"
 dependencies = [
- "arrow",
+ "arrow 18.0.0",
  "arrow_util",
  "async-trait",
  "backoff",
@@ -4140,7 +4167,7 @@ dependencies = [
 name = "read_buffer"
 version = "0.1.0"
 dependencies = [
- "arrow",
+ "arrow 18.0.0",
  "arrow_util",
  "criterion",
  "croaring",
@@ -4563,7 +4590,7 @@ dependencies = [
 name = "schema"
 version = "0.1.0"
 dependencies = [
- "arrow",
+ "arrow 18.0.0",
  "hashbrown",
  "indexmap",
  "itertools",
@@ -4725,7 +4752,7 @@ dependencies = [
 name = "service_grpc_flight"
 version = "0.1.0"
 dependencies = [
- "arrow",
+ "arrow 18.0.0",
  "arrow-flight",
  "arrow_util",
  "bytes",
@@ -4752,7 +4779,7 @@ dependencies = [
 name = "service_grpc_influxrpc"
 version = "0.1.0"
 dependencies = [
- "arrow",
+ "arrow 18.0.0",
  "async-trait",
  "data_types",
  "datafusion 0.1.0",
@@ -5290,7 +5317,7 @@ dependencies = [
 name = "test_helpers_end_to_end"
 version = "0.1.0"
 dependencies = [
- "arrow",
+ "arrow 18.0.0",
  "arrow_util",
  "assert_cmd",
  "bytes",
@@ -6225,7 +6252,7 @@ name = "workspace-hack"
 version = "0.1.0"
 dependencies = [
  "ahash",
- "arrow",
+ "arrow 18.0.0",
  "base64 0.13.0",
  "bitflags",
  "byteorder",
