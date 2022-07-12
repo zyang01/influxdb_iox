@@ -6272,7 +6272,6 @@ name = "workspace-hack"
 version = "0.1.0"
 dependencies = [
  "ahash",
- "arrow 17.0.0",
  "base64 0.13.0",
  "bitflags",
  "byteorder",
