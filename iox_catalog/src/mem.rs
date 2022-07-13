@@ -15,12 +15,12 @@ use data_types::{
     Column, ColumnId, ColumnType, CompactionLevel, KafkaPartition, KafkaTopic, KafkaTopicId,
     Namespace, NamespaceId, ParquetFile, ParquetFileId, ParquetFileParams, Partition, PartitionId,
     PartitionInfo, PartitionKey, ProcessedTombstone, QueryPool, QueryPoolId, SequenceNumber,
-    Sequencer, SequencerId, Table, TableId, TablePartition, Timestamp, Tombstone, TombstoneId,
+    Sequencer, SequencerId, Table, TableId, TablePartition, Timestamp, Tombstone, TombstoneId, PartitionParam,
 };
 use iox_time::{SystemProvider, TimeProvider};
 use observability_deps::tracing::warn;
 use sqlx::types::Uuid;
-use std::{collections::HashSet, convert::TryFrom, fmt::Formatter, sync::Arc};
+use std::{collections::{HashSet, HashMap}, convert::TryFrom, fmt::Formatter, sync::Arc};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
 /// In-memory catalog that implements the `RepoCollection` and individual repo traits from
@@ -1099,6 +1099,51 @@ impl ParquetFileRepo for MemTxn {
                         || (f.min_time > min_time && f.min_time <= max_time))
             })
             .cloned()
+            .collect())
+    }
+
+    async fn recent_higest_throughput_partitions(
+        &mut self,
+        sequencer_id: SequencerId,
+        num_hours: i32,
+        min_num_files: i32,
+        num_partitions: i32,
+    ) -> Result<Vec<PartitionParam>> {
+        let stage = self.stage();
+
+        // num_hours in nano seconds
+        let duration: i64 = (num_hours * 1000000000 * 60 * 60).into();
+
+        let recent_time = Timestamp::new(self.time_provider.now().timestamp_nanos() - duration);
+
+        let partitions = stage
+            .parquet_files
+            .iter()
+            .filter(|f| {
+                f.sequencer_id == sequencer_id
+                    && f.created_at > recent_time
+                    && f.compaction_level == CompactionLevel::Initial
+                    && f.to_delete.is_none()
+            })
+            .map(|pf| PartitionParam{
+                partition_id: pf.partition_id,
+                sequencer_id: pf.sequencer_id,
+                namespace_id: pf.namespace_id,
+                table_id: pf.table_id,
+            })
+            .collect::<Vec<_>>();
+
+        // count duplicates
+        let mut map: HashMap<PartitionParam, usize> = HashMap::new();
+        for p in partitions {
+            map.entry(p) += 1;
+        }
+
+        // only return the ones with num duplicates >= min_num_files
+        Ok(map
+            .iter()
+            .filter(|(_, v)| v >= min_num_files)
+            .map(|k, _| k)
             .collect())
     }
 

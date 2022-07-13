@@ -14,7 +14,7 @@ use data_types::{
     Column, ColumnType, CompactionLevel, KafkaPartition, KafkaTopic, KafkaTopicId, Namespace,
     NamespaceId, ParquetFile, ParquetFileId, ParquetFileParams, Partition, PartitionId,
     PartitionInfo, PartitionKey, ProcessedTombstone, QueryPool, QueryPoolId, SequenceNumber,
-    Sequencer, SequencerId, Table, TableId, TablePartition, Timestamp, Tombstone, TombstoneId,
+    Sequencer, SequencerId, Table, TableId, TablePartition, Timestamp, Tombstone, TombstoneId, PartitionParam,
 };
 use iox_time::{SystemProvider, TimeProvider};
 use observability_deps::tracing::{debug, info, warn};
@@ -1673,6 +1673,36 @@ WHERE parquet_file.sequencer_id = $1
         .bind(CompactionLevel::FileNonOverlapped) // $4
         .bind(min_time) // $5
         .bind(max_time) // $6
+        .fetch_all(&mut self.inner)
+        .await
+        .map_err(|e| Error::SqlxError { source: e })
+    }
+
+    async fn recent_higest_throughput_partitions(
+        &mut self,
+        sequencer_id: SequencerId,
+        num_hours: i32,
+        min_num_files: i32,
+        num_partitions: i32,
+    ) -> Result<Vec<PartitionParam>> {
+        
+        sqlx::query_as::<_, PartitionParam>(
+            r#"
+SELECT partition_id, sequencer_id, namespace_id, table_id, count(id)
+FROM parquet_file 
+WHERE compaction_level = 0 and to_delete is null
+    and sequencer_id = $1
+    and to_timestamp(created_at/1000000000) > now() - interval '$2 hour'
+group by 1, 2, 3, 4
+having count(id) > $3
+order by 5 DESC
+limit $4;      
+            "#,
+        )
+        .bind(&sequencer_id) // $1
+        .bind(&num_hours) //$2
+        .bind(&min_num_files) // $3
+        .bind(&num_partitions) // $4
         .fetch_all(&mut self.inner)
         .await
         .map_err(|e| Error::SqlxError { source: e })

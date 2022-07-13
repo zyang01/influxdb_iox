@@ -324,6 +324,53 @@ impl Compactor {
         Ok(())
     }
 
+    /// Return a list of the most recent highest ingested throughput partitions.
+    /// n highest throughput partitions will be chosen for each sequencer. The return list
+    /// will include, p = n * s, partitions where s is the number of sequencers this compactor handles.
+    pub async fn partitions_to_compact_new(&self) -> Result<Vec<PartitionCompactionCandidate>> {
+        // Questions: Not sure if I want these numbers as config params
+        // Number of most recent highest ingested throughput partitions per sequencer
+        // we want to read
+        let num_highest_throughput_partitions_per_sequencer = 1;
+        // Minimum number of most recently ingested files per partition we want to count
+        // to prioritize partitions to compact
+        let _minimun_recent_ingested_files = 2;
+
+        let mut candidates = Vec::with_capacity(
+            self.sequencers.len() * num_highest_throughput_partitions_per_sequencer,
+        );
+
+        for _sequencer_id in &self.sequencers {
+            // Get the most recent highest ingested throughput partitions within
+            // the last 4 hours. If nothing, increase to 24 hours
+            let mut has_partitions = false;
+            for _num_hours in &[4, 24] {
+
+                // TODO: metrics to measure runtime of the below catalog query
+                let mut partitions: Vec<PartitionCompactionCandidate> = vec![]; //todo
+
+                if !partitions.is_empty() {
+                    candidates.append(&mut partitions);
+                    has_partitions = true;
+                    break;
+                }
+            }
+
+            // No active ingesting partitions the last 24 hours,
+            // get partition with the most level-0 file
+            if !has_partitions {
+                // TODO: metrics to measure runtime of the below catalog query
+                let mut partitions: Vec<PartitionCompactionCandidate> = vec![]; // todo
+                if !partitions.is_empty() {
+                    candidates.append(&mut partitions);
+                }
+            }
+        }
+
+        Ok(candidates)
+    }
+
+    // TODO: remove
     /// Returns a list of partitions that have level 0 files to compact along with some summary
     /// statistics that the scheduler can use to decide which partitions to prioritize. Orders
     /// them by the number of level 0 files and then size.
@@ -1071,6 +1118,7 @@ pub struct PartitionCompactionCandidate {
     pub partition_id: PartitionId,
     /// namespace ID
     pub namespace_id: NamespaceId,
+
     /// the number of level 0 files in the partition
     pub level_0_file_count: usize,
     /// the total bytes of the level 0 files to compact

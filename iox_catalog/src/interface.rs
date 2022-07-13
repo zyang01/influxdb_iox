@@ -6,7 +6,7 @@ use data_types::{
     NamespaceId, NamespaceSchema, ParquetFile, ParquetFileId, ParquetFileParams, Partition,
     PartitionId, PartitionInfo, PartitionKey, ProcessedTombstone, QueryPool, QueryPoolId,
     SequenceNumber, Sequencer, SequencerId, Table, TableId, TablePartition, TableSchema, Timestamp,
-    Tombstone, TombstoneId,
+    Tombstone, TombstoneId, PartitionParam,
 };
 use iox_time::TimeProvider;
 use snafu::{OptionExt, Snafu};
@@ -542,6 +542,15 @@ pub trait ParquetFileRepo: Send + Sync {
         min_time: Timestamp,
         max_time: Timestamp,
     ) -> Result<Vec<ParquetFile>>;
+
+    /// List the most recent higest throughput partition for a given sequencer
+    async fn recent_higest_throughput_partitions(
+        &mut self,
+        sequencer_id: SequencerId,
+        num_hours: i32,
+        min_num_files: i32,
+        num_partitions: i32,
+    ) -> Result<Vec<PartitionParam>>;
 
     /// List parquet files for a given partition that are NOT marked as
     /// [`to_delete`](ParquetFile::to_delete).
