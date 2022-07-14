@@ -2486,13 +2486,11 @@ mod tests {
     }
 
     fn make_compactor_config() -> CompactorConfig {
-        let compaction_max_number_level_0_files = 3;
         let compaction_max_desired_file_size_bytes = 10_000;
         let compaction_percentage_max_file_size = 30;
         let compaction_split_percentage = 80;
         let max_concurrent_compaction_size_bytes = 100_000;
         CompactorConfig::new(
-            compaction_max_number_level_0_files,
             compaction_max_desired_file_size_bytes,
             compaction_percentage_max_file_size,
             compaction_split_percentage,

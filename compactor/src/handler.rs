@@ -99,9 +99,6 @@ impl CompactorHandlerImpl {
 /// The configuration options for the compactor.
 #[derive(Debug, Clone, Copy)]
 pub struct CompactorConfig {
-    /// Max number of level-0 files (written by ingester) we want to compact with level-1 each time
-    compaction_max_number_level_0_files: i32,
-
     /// Desired max size of compacted parquet files
     /// It is a target desired value than a guarantee
     compaction_max_desired_file_size_bytes: i64,
@@ -116,10 +113,13 @@ pub struct CompactorConfig {
     /// Split file percentage
     /// If the estimated compacted result is neither too small nor too large, it will be split
     /// into 2 files determined by this percentage.
-    ///    . Too small means: < compaction_percentage_max_file_size * compaction_max_desired_file_size_bytes
-    ///    . Too large means: > compaction_max_desired_file_size_bytes
-    ///    . Any size in the middle will be considered neither too small nor too large
-    /// This value must be between (0, 100)
+    ///
+    /// * Too small means: < compaction_percentage_max_file_size *
+    ///   compaction_max_desired_file_size_bytes
+    /// * Too large means: > compaction_max_desired_file_size_bytes
+    /// * Any size in the middle will be considered neither too small nor too large
+    ///
+    /// This value must be between (0, 100).
     compaction_split_percentage: i16,
 
     /// The compactor will limit the number of simultaneous compaction jobs based on the
@@ -132,7 +132,6 @@ pub struct CompactorConfig {
 impl CompactorConfig {
     /// Initialize a valid config
     pub fn new(
-        compaction_max_number_level_0_files: i32,
         compaction_max_desired_file_size_bytes: i64,
         compaction_percentage_max_file_size: i16,
         compaction_split_percentage: i16,
@@ -141,17 +140,11 @@ impl CompactorConfig {
         assert!(compaction_split_percentage > 0 && compaction_split_percentage <= 100);
 
         Self {
-            compaction_max_number_level_0_files,
             compaction_max_desired_file_size_bytes,
             compaction_percentage_max_file_size,
             compaction_split_percentage,
             max_concurrent_compaction_size_bytes,
         }
-    }
-
-    /// Max number of level-0 files we want to compact with level-1 each time
-    pub fn compaction_max_number_level_0_files(&self) -> i32 {
-        self.compaction_max_number_level_0_files
     }
 
     /// Desired max file of a compacted file

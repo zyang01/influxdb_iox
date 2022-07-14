@@ -27,18 +27,6 @@ pub struct CompactorConfig {
     )]
     pub write_buffer_partition_range_end: i32,
 
-    /// Max number of level-0 files (written by ingester) we want to compact with level-1 each time
-    /// Default: 3
-    #[clap(
-        // TODO: verify the theory that if the streaming works as expected,
-        // we do not need to limit this number
-        long = "--compaction-max-number-level-0-files",
-        env = "INFLUXDB_IOX_COMPACTION_MAX_NUMBER_LEVEL_0_FILES",
-        default_value = "3",
-        action
-    )]
-    pub max_number_level_0_files: i32,
-
     /// Desired max size of compacted parquet files.
     /// It is a target desired value, rather than a guarantee.
     /// Default is 1024 * 1024 * 100 = 104,857,600 bytes (100MB)
