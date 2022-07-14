@@ -30,7 +30,7 @@ pub struct CompactorConfig {
     /// Max number of level-0 files (written by ingester) we want to compact with level-1 each time
     /// Default: 3
     #[clap(
-        // TODO: verify the theory that if the streaming works  as expected,
+        // TODO: verify the theory that if the streaming works as expected,
         // we do not need to limit this number
         long = "--compaction-max-number-level-0-files",
         env = "INFLUXDB_IOX_COMPACTION_MAX_NUMBER_LEVEL_0_FILES",
@@ -39,13 +39,13 @@ pub struct CompactorConfig {
     )]
     pub compaction_max_number_level_0_files: i32,
 
-    /// Desired max size of compacted parquet files
-    /// It is a target desired value than a guarantee
-    /// Default is 100,000,000 (100MB)
+    /// Desired max size of compacted parquet files.
+    /// It is a target desired value, rather than a guarantee.
+    /// Default is 1024 * 1024 * 100 = 104,857,600 bytes (100MB)
     #[clap(
         long = "--compaction-max-desired-size-bytes",
         env = "INFLUXDB_IOX_COMPACTION_MAX_DESIRED_FILE_SIZE_BYTES",
-        default_value = "100000000",
+        default_value = "104857600",
         action
     )]
     pub compaction_max_desired_file_size_bytes: i64,
@@ -67,9 +67,12 @@ pub struct CompactorConfig {
     /// Split file percentage
     /// If the estimated compacted result is neither too small nor too large, it will be split
     /// into 2 files determined by this percentage.
-    ///    . Too small means: < compaction_percentage_max_file_size * compaction_max_desired_file_size_bytes
+    ///
+    ///    . Too small means: < compaction_percentage_max_file_size *
+    ///      compaction_max_desired_file_size_bytes
     ///    . Too large means: > compaction_max_desired_file_size_bytes
     ///    . Any size in the middle will be considered neither too small nor too large
+    ///
     /// This value must be between (0, 100)
     /// Default is 80
     #[clap(
@@ -81,13 +84,13 @@ pub struct CompactorConfig {
     pub compaction_split_percentage: i16,
 
     /// The compactor will limit the number of simultaneous compaction jobs based on the
-    /// size of the input files to be compacted.  This number should be less than 1/10th
+    /// size of the input files to be compacted. This number should be less than 1/10th
     /// of the available memory to ensure compactions have
-    /// enough space to run. Default is 1,000,000,000 (1GB ).
+    /// enough space to run. Default is 1,073,741,824 bytes (1GB ).
     #[clap(
         long = "--compaction-concurrent-size-bytes",
         env = "INFLUXDB_IOX_COMPACTION_CONCURRENT_SIZE_BYTES",
-        default_value = "100000000",
+        default_value = "1073741824",
         action
     )]
     pub max_concurrent_compaction_size_bytes: i64,
