@@ -37,7 +37,7 @@ pub struct CompactorConfig {
         default_value = "3",
         action
     )]
-    pub compaction_max_number_level_0_files: i32,
+    pub max_number_level_0_files: i32,
 
     /// Desired max size of compacted parquet files.
     /// It is a target desired value, rather than a guarantee.
@@ -48,7 +48,7 @@ pub struct CompactorConfig {
         default_value = "104857600",
         action
     )]
-    pub compaction_max_desired_file_size_bytes: i64,
+    pub max_desired_file_size_bytes: i64,
 
     /// Percentage of desired max file size.
     /// If the estimated compacted result is too small, no need to split it.
@@ -62,7 +62,7 @@ pub struct CompactorConfig {
         default_value = "30",
         action
     )]
-    pub compaction_percentage_max_file_size: i16,
+    pub percentage_max_file_size: i16,
 
     /// Split file percentage
     /// If the estimated compacted result is neither too small nor too large, it will be split
@@ -81,7 +81,7 @@ pub struct CompactorConfig {
         default_value = "80",
         action
     )]
-    pub compaction_split_percentage: i16,
+    pub split_percentage: i16,
 
     /// The compactor will limit the number of simultaneous compaction jobs based on the
     /// size of the input files to be compacted. This number should be less than 1/10th
@@ -93,5 +93,5 @@ pub struct CompactorConfig {
         default_value = "1073741824",
         action
     )]
-    pub max_concurrent_compaction_size_bytes: i64,
+    pub max_concurrent_size_bytes: i64,
 }
