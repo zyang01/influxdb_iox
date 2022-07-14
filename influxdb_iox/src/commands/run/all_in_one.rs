@@ -396,6 +396,7 @@ impl Config {
             percentage_max_file_size: 30,
             split_percentage: 80,
             max_concurrent_size_bytes: 100000,
+            new_param: 3,
         };
 
         let querier_config = QuerierConfig {

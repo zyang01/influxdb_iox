@@ -127,6 +127,9 @@ pub struct CompactorConfig {
     /// of the available memory to ensure compactions have
     /// enough space to run.
     max_concurrent_compaction_size_bytes: i64,
+
+    /// TODO: describe this. Multiplier?
+    new_param: i64,
 }
 
 impl CompactorConfig {
@@ -136,6 +139,7 @@ impl CompactorConfig {
         compaction_percentage_max_file_size: i16,
         compaction_split_percentage: i16,
         max_concurrent_compaction_size_bytes: i64,
+        new_param: i64,
     ) -> Self {
         assert!(compaction_split_percentage > 0 && compaction_split_percentage <= 100);
 
@@ -144,6 +148,7 @@ impl CompactorConfig {
             compaction_percentage_max_file_size,
             compaction_split_percentage,
             max_concurrent_compaction_size_bytes,
+            new_param,
         }
     }
 
@@ -169,6 +174,11 @@ impl CompactorConfig {
     /// enough space to run.
     pub fn max_concurrent_compaction_size_bytes(&self) -> i64 {
         self.max_concurrent_compaction_size_bytes
+    }
+
+    /// TODO: Describe this. Multiplier?
+    pub fn new_param(&self) -> i64 {
+        self.new_param
     }
 }
 

@@ -82,4 +82,13 @@ pub struct CompactorConfig {
         action
     )]
     pub max_concurrent_size_bytes: i64,
+
+    /// TODO: Describe this. Multiplier?
+    #[clap(
+        long = "--new-param",
+        env = "INFLUXDB_IOX_COMPACTION_NEW_PARAM",
+        default_value = "3",
+        action
+    )]
+    pub new_param: i64,
 }
