@@ -1679,7 +1679,7 @@ WHERE parquet_file.sequencer_id = $1
         .map_err(|e| Error::SqlxError { source: e })
     }
 
-    async fn recent_higest_throughput_partitions(
+    async fn recent_highest_throughput_partitions(
         &mut self,
         sequencer_id: SequencerId,
         num_hours: i32,
@@ -1696,15 +1696,15 @@ SELECT partition_id, sequencer_id, namespace_id, table_id, count(id)
 FROM parquet_file 
 WHERE compaction_level = 0 and to_delete is null
     and sequencer_id = $1
-    and to_timestamp(created_at/1000000000) > now() - interval '$2 hour'
+    and to_timestamp(created_at/1000000000) > now() -  ($2 || 'hour')::interval
 group by 1, 2, 3, 4
-having count(id) > $3
+having count(id) >= $3
 order by 5 DESC
 limit $4;      
             "#,
         )
         .bind(&sequencer_id) // $1
-        .bind(&num_hours) //$2
+        .bind(num_hours) //$2
         .bind(&min_num_files) // $3
         .bind(&num_partitions) // $4
         .fetch_all(&mut self.inner)
@@ -1721,12 +1721,12 @@ limit $4;
         // We have index on (sequencer_id, comapction_level, to_delete)
         sqlx::query_as::<_, PartitionParam>(
             r#"
-SELECT partition_id, count(id)
+SELECT partition_id, sequencer_id, namespace_id, table_id, count(id)
 FROM   parquet_file 
 WHERE  compaction_level = 0 and to_delete is null
     and sequencer_id = $1
-group by 1
-order by 2 DESC
+group by 1, 2, 3, 4
+order by 5 DESC
 limit $2;      
             "#,
         )

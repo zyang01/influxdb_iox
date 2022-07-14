@@ -26,6 +26,7 @@ use std::{
     convert::TryFrom,
     fmt::Formatter,
     sync::Arc,
+    time::Duration,
 };
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
@@ -1108,17 +1109,17 @@ impl ParquetFileRepo for MemTxn {
             .collect())
     }
 
-    async fn recent_higest_throughput_partitions(
+    async fn recent_highest_throughput_partitions(
         &mut self,
         sequencer_id: SequencerId,
         num_hours: i32,
         min_num_files: i32,
         num_partitions: i32,
     ) -> Result<Vec<PartitionParam>> {
-        let time_now = self.time_provider.now().timestamp_nanos();
-        // num_hours in nano seconds
-        let duration: i64 = (num_hours * 1000000000 * 60 * 60).into();
-        let recent_time = Timestamp::new(time_now - duration);
+        let recent_time = Timestamp::new(
+            (self.time_provider.now() - Duration::from_secs(60 * 60 * num_hours as u64))
+                .timestamp_nanos(),
+        );
 
         let stage = self.stage();
 

@@ -363,7 +363,7 @@ impl Compactor {
 
                 let mut partitions = repos
                     .parquet_files()
-                    .recent_higest_throughput_partitions(
+                    .recent_highest_throughput_partitions(
                         *sequencer_id,
                         num_hours,
                         minimun_recent_ingested_files,
