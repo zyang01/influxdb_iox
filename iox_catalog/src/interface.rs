@@ -4,9 +4,9 @@ use async_trait::async_trait;
 use data_types::{
     Column, ColumnSchema, ColumnType, KafkaPartition, KafkaTopic, KafkaTopicId, Namespace,
     NamespaceId, NamespaceSchema, ParquetFile, ParquetFileId, ParquetFileParams, Partition,
-    PartitionId, PartitionInfo, PartitionKey, ProcessedTombstone, QueryPool, QueryPoolId,
-    SequenceNumber, Sequencer, SequencerId, Table, TableId, TablePartition, TableSchema, Timestamp,
-    Tombstone, TombstoneId, PartitionParam,
+    PartitionId, PartitionInfo, PartitionKey, PartitionParam, ProcessedTombstone, QueryPool,
+    QueryPoolId, SequenceNumber, Sequencer, SequencerId, Table, TableId, TablePartition,
+    TableSchema, Timestamp, Tombstone, TombstoneId,
 };
 use iox_time::TimeProvider;
 use snafu::{OptionExt, Snafu};
@@ -549,6 +549,13 @@ pub trait ParquetFileRepo: Send + Sync {
         sequencer_id: SequencerId,
         num_hours: i32,
         min_num_files: i32,
+        num_partitions: i32,
+    ) -> Result<Vec<PartitionParam>>;
+
+    /// List partitions with the most level 0 files for a given sequencer
+    async fn most_level_0_files_partitions(
+        &mut self,
+        sequencer_id: SequencerId,
         num_partitions: i32,
     ) -> Result<Vec<PartitionParam>>;
 

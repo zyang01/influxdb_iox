@@ -14,13 +14,19 @@ use async_trait::async_trait;
 use data_types::{
     Column, ColumnId, ColumnType, CompactionLevel, KafkaPartition, KafkaTopic, KafkaTopicId,
     Namespace, NamespaceId, ParquetFile, ParquetFileId, ParquetFileParams, Partition, PartitionId,
-    PartitionInfo, PartitionKey, ProcessedTombstone, QueryPool, QueryPoolId, SequenceNumber,
-    Sequencer, SequencerId, Table, TableId, TablePartition, Timestamp, Tombstone, TombstoneId, PartitionParam,
+    PartitionInfo, PartitionKey, PartitionParam, ProcessedTombstone, QueryPool, QueryPoolId,
+    SequenceNumber, Sequencer, SequencerId, Table, TableId, TablePartition, Timestamp, Tombstone,
+    TombstoneId,
 };
 use iox_time::{SystemProvider, TimeProvider};
 use observability_deps::tracing::warn;
 use sqlx::types::Uuid;
-use std::{collections::{HashSet, HashMap}, convert::TryFrom, fmt::Formatter, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    convert::TryFrom,
+    fmt::Formatter,
+    sync::Arc,
+};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
 /// In-memory catalog that implements the `RepoCollection` and individual repo traits from
@@ -1109,13 +1115,14 @@ impl ParquetFileRepo for MemTxn {
         min_num_files: i32,
         num_partitions: i32,
     ) -> Result<Vec<PartitionParam>> {
-        let stage = self.stage();
-
+        let time_now = self.time_provider.now().timestamp_nanos();
         // num_hours in nano seconds
         let duration: i64 = (num_hours * 1000000000 * 60 * 60).into();
+        let recent_time = Timestamp::new(time_now - duration);
 
-        let recent_time = Timestamp::new(self.time_provider.now().timestamp_nanos() - duration);
+        let stage = self.stage();
 
+        // Get partition info of selected files
         let partitions = stage
             .parquet_files
             .iter()
@@ -1125,7 +1132,7 @@ impl ParquetFileRepo for MemTxn {
                     && f.compaction_level == CompactionLevel::Initial
                     && f.to_delete.is_none()
             })
-            .map(|pf| PartitionParam{
+            .map(|pf| PartitionParam {
                 partition_id: pf.partition_id,
                 sequencer_id: pf.sequencer_id,
                 namespace_id: pf.namespace_id,
@@ -1133,18 +1140,72 @@ impl ParquetFileRepo for MemTxn {
             })
             .collect::<Vec<_>>();
 
-        // count duplicates
-        let mut map: HashMap<PartitionParam, usize> = HashMap::new();
+        // Count num of files per partition by simply count the number of partition duplicates
+        let mut partition_duplicate_count: HashMap<PartitionParam, i32> =
+            HashMap::with_capacity(partitions.len());
         for p in partitions {
-            map.entry(p) += 1;
+            let count = partition_duplicate_count.entry(p).or_insert(0);
+            *count += 1;
         }
 
-        // only return the ones with num duplicates >= min_num_files
-        Ok(map
+        // Partitions with select file count > min_num_files
+        let mut partitions = partition_duplicate_count
             .iter()
-            .filter(|(_, v)| v >= min_num_files)
-            .map(|k, _| k)
-            .collect())
+            .filter(|(_, v)| v >= &&min_num_files)
+            .collect::<Vec<_>>();
+
+        // Sort partitions by file count
+        partitions.sort_by(|a, b| b.1.cmp(a.1));
+
+        let mut partitions = partitions.iter().map(|(k, _)| **k).collect::<Vec<_>>();
+
+        // Return top partitions with most file counts
+        partitions.truncate(num_partitions as usize);
+
+        Ok(partitions)
+    }
+
+    async fn most_level_0_files_partitions(
+        &mut self,
+        sequencer_id: SequencerId,
+        num_partitions: i32,
+    ) -> Result<Vec<PartitionParam>> {
+        let stage = self.stage();
+        let partitions = stage
+            .parquet_files
+            .iter()
+            .filter(|f| {
+                f.sequencer_id == sequencer_id
+                    && f.compaction_level == CompactionLevel::Initial
+                    && f.to_delete.is_none()
+            })
+            .map(|pf| PartitionParam {
+                partition_id: pf.partition_id,
+                sequencer_id: pf.sequencer_id,
+                namespace_id: pf.namespace_id,
+                table_id: pf.table_id,
+            })
+            .collect::<Vec<_>>();
+
+        // Count num of files per partition by simply count the number of partition duplicates
+        let mut partition_duplicate_count: HashMap<PartitionParam, i32> =
+            HashMap::with_capacity(partitions.len());
+        for p in partitions {
+            let count = partition_duplicate_count.entry(p).or_insert(0);
+            *count += 1;
+        }
+
+        // Sort partitions by file count
+        // Partitions with select file count > min_num_files
+        let mut partitions = partition_duplicate_count.iter().collect::<Vec<_>>();
+        partitions.sort_by(|a, b| b.1.cmp(a.1));
+
+        let mut partitions = partitions.iter().map(|(k, _)| **k).collect::<Vec<_>>();
+
+        // Return top partitions with most file counts
+        partitions.truncate(num_partitions as usize);
+
+        Ok(partitions)
     }
 
     async fn list_by_partition_not_to_delete(

@@ -833,7 +833,7 @@ pub struct PartitionInfo {
 }
 
 /// Data for a partition  chosen from its parquet files
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, sqlx::FromRow)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, sqlx::FromRow)]
 pub struct PartitionParam {
     /// the partition
     pub partition_id: PartitionId,
@@ -843,12 +843,6 @@ pub struct PartitionParam {
     pub namespace_id: NamespaceId,
     /// the partition's table
     pub table_id: TableId,
-}
-
-impl Hash for PartitionParam {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.partition_id.hash(state);
-    }
 }
 
 /// Data object for a tombstone.

@@ -8,7 +8,7 @@ use crate::{
 use backoff::BackoffConfig;
 use data_types::{
     CompactionLevel, Namespace, NamespaceId, ParquetFile, ParquetFileId, Partition, PartitionId,
-    SequencerId, Table, TableId, TableSchema, Timestamp, Tombstone, TombstoneId,
+    PartitionParam, SequencerId, Table, TableId, TableSchema, Timestamp, Tombstone, TombstoneId,
 };
 use datafusion::error::DataFusionError;
 use futures::stream::{FuturesUnordered, TryStreamExt};
@@ -151,6 +151,19 @@ pub enum Error {
         min_seq_2: i64,
         max_seq_2: i64,
         partition_id: PartitionId,
+    },
+
+    #[snafu(display(
+        "Error getting the most recent highest ingested throughput partitions for sequencer {}",
+        source
+    ))]
+    HighestThroughputPartitions {
+        source: iox_catalog::interface::Error,
+    },
+
+    #[snafu(display("Error getting the most level 0 file partitions {}", source))]
+    MostL0Partitions {
+        source: iox_catalog::interface::Error,
     },
 }
 
@@ -327,27 +340,37 @@ impl Compactor {
     /// Return a list of the most recent highest ingested throughput partitions.
     /// n highest throughput partitions will be chosen for each sequencer. The return list
     /// will include, p = n * s, partitions where s is the number of sequencers this compactor handles.
-    pub async fn partitions_to_compact_new(&self) -> Result<Vec<PartitionCompactionCandidate>> {
+    pub async fn partitions_to_compact_new(&self) -> Result<Vec<PartitionParam>> {
         // Questions: Not sure if I want these numbers as config params
         // Number of most recent highest ingested throughput partitions per sequencer
         // we want to read
-        let num_highest_throughput_partitions_per_sequencer = 1;
+        let num_partitions_per_sequencer: i32 = 1;
         // Minimum number of most recently ingested files per partition we want to count
         // to prioritize partitions to compact
-        let _minimun_recent_ingested_files = 2;
+        let minimun_recent_ingested_files = 2;
 
-        let mut candidates = Vec::with_capacity(
-            self.sequencers.len() * num_highest_throughput_partitions_per_sequencer,
-        );
+        let mut candidates =
+            Vec::with_capacity(self.sequencers.len() * num_partitions_per_sequencer as usize);
 
-        for _sequencer_id in &self.sequencers {
+        let mut repos = self.catalog.repositories().await;
+
+        for sequencer_id in &self.sequencers {
             // Get the most recent highest ingested throughput partitions within
             // the last 4 hours. If nothing, increase to 24 hours
             let mut has_partitions = false;
-            for _num_hours in &[4, 24] {
-
+            for num_hours in [4, 24] {
                 // TODO: metrics to measure runtime of the below catalog query
-                let mut partitions: Vec<PartitionCompactionCandidate> = vec![]; //todo
+
+                let mut partitions = repos
+                    .parquet_files()
+                    .recent_higest_throughput_partitions(
+                        *sequencer_id,
+                        num_hours,
+                        minimun_recent_ingested_files,
+                        num_partitions_per_sequencer,
+                    )
+                    .await
+                    .context(HighestThroughputPartitionsSnafu)?;
 
                 if !partitions.is_empty() {
                     candidates.append(&mut partitions);
@@ -360,7 +383,13 @@ impl Compactor {
             // get partition with the most level-0 file
             if !has_partitions {
                 // TODO: metrics to measure runtime of the below catalog query
-                let mut partitions: Vec<PartitionCompactionCandidate> = vec![]; // todo
+
+                let mut partitions = repos
+                    .parquet_files()
+                    .most_level_0_files_partitions(*sequencer_id, num_partitions_per_sequencer)
+                    .await
+                    .context(MostL0PartitionsSnafu)?;
+
                 if !partitions.is_empty() {
                     candidates.append(&mut partitions);
                 }

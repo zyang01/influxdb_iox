@@ -13,8 +13,9 @@ use async_trait::async_trait;
 use data_types::{
     Column, ColumnType, CompactionLevel, KafkaPartition, KafkaTopic, KafkaTopicId, Namespace,
     NamespaceId, ParquetFile, ParquetFileId, ParquetFileParams, Partition, PartitionId,
-    PartitionInfo, PartitionKey, ProcessedTombstone, QueryPool, QueryPoolId, SequenceNumber,
-    Sequencer, SequencerId, Table, TableId, TablePartition, Timestamp, Tombstone, TombstoneId, PartitionParam,
+    PartitionInfo, PartitionKey, PartitionParam, ProcessedTombstone, QueryPool, QueryPoolId,
+    SequenceNumber, Sequencer, SequencerId, Table, TableId, TablePartition, Timestamp, Tombstone,
+    TombstoneId,
 };
 use iox_time::{SystemProvider, TimeProvider};
 use observability_deps::tracing::{debug, info, warn};
@@ -1685,7 +1686,10 @@ WHERE parquet_file.sequencer_id = $1
         min_num_files: i32,
         num_partitions: i32,
     ) -> Result<Vec<PartitionParam>> {
-        
+        // The preliminary performance test on 6 days of data, this query runs around 55ms
+        // We have index on (sequencer_id, comapction_level, to_delete)
+        // If this query happens to be a lot slower (>500ms), we might think to add
+        // and index on (sequencer_id, comapction_level, to_delete, created_at)
         sqlx::query_as::<_, PartitionParam>(
             r#"
 SELECT partition_id, sequencer_id, namespace_id, table_id, count(id)
@@ -1703,6 +1707,31 @@ limit $4;
         .bind(&num_hours) //$2
         .bind(&min_num_files) // $3
         .bind(&num_partitions) // $4
+        .fetch_all(&mut self.inner)
+        .await
+        .map_err(|e| Error::SqlxError { source: e })
+    }
+
+    async fn most_level_0_files_partitions(
+        &mut self,
+        sequencer_id: SequencerId,
+        num_partitions: i32,
+    ) -> Result<Vec<PartitionParam>> {
+        // The preliminary performance test says this query runs around 50ms
+        // We have index on (sequencer_id, comapction_level, to_delete)
+        sqlx::query_as::<_, PartitionParam>(
+            r#"
+SELECT partition_id, count(id)
+FROM   parquet_file 
+WHERE  compaction_level = 0 and to_delete is null
+    and sequencer_id = $1
+group by 1
+order by 2 DESC
+limit $2;      
+            "#,
+        )
+        .bind(&sequencer_id) // $1
+        .bind(&num_partitions) // $2
         .fetch_all(&mut self.inner)
         .await
         .map_err(|e| Error::SqlxError { source: e })
