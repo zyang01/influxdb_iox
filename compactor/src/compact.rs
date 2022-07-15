@@ -242,11 +242,11 @@ pub struct Compactor {
     compaction_duration: Metric<DurationHistogram>,
 
     /// Histogram for tracking the time of a catalog query to get
-    /// recent highest throughput partitions
+    /// the most recent highest throughput partitions
     compaction_query_highest_throughput_duration: Metric<DurationHistogram>,
 
     /// Histogram for tracking the time of a catalog query to get
-    /// most level 0 files partitions
+    /// the most level 0 files partitions
     compaction_query_most_l0_duration: Metric<DurationHistogram>,
 }
 
@@ -290,13 +290,13 @@ impl Compactor {
         let compaction_query_highest_throughput_duration: Metric<DurationHistogram> = registry
             .register_metric(
                 "compaction_query_highest_throughput_duration",
-                "Duration of catalog query that gets recent highest ingested throughput partitions",
+                "Duration of a catalog query that gets the most recent highest ingested throughput partitions",
             );
 
         let compaction_query_most_l0_duration: Metric<DurationHistogram> = registry
             .register_metric(
                 "compaction_query_most_l0__duration",
-                "Duration of catalog query that gets partitions with the most l0 files",
+                "Duration of a catalog query that gets partitions with the most level-0 files",
             );
 
         Self {
@@ -343,7 +343,6 @@ impl Compactor {
     /// Return a list of the most recent highest ingested throughput partitions.
     /// The highest throughput partitions are prioritized as follows:
     ///  1. If there are partitions with new writes within the last 4 hours, pick them.
-    ///     The one with the most files will be first in the list.
     ///  2. If no new writes in the last 4 hours, will look for partitions with new writes
     ///     within the last 24 hours.
     ///  3. If there are no writes within the last 24 hours, will look for partitions
@@ -355,10 +354,10 @@ impl Compactor {
     ///     sequencers this compactor handles.
     pub async fn partitions_to_compact(
         &self,
-        // Number of most recent highest ingested throughput partitions
+        //  Max number of the most recent highest ingested throughput partitions
         // per sequencer we want to read
-        num_partitions_per_sequencer: i32,
-        // Minimum number of most recent writes per partition we want to count
+        max_num_partitions_per_sequencer: i32,
+        // Minimum number of the most recent writes per partition we want to count
         // to prioritize partitions
         minimun_recent_ingested_files: i32,
     ) -> Result<Vec<PartitionParam>> {
@@ -403,7 +402,7 @@ impl Compactor {
             }
 
             // No active ingesting partitions the last 24 hours,
-            // get partition with the most level-0 file
+            // get partition with the most level-0 files
             if num_partitions == 0 {
                 let start_time = self.time_provider.now();
 
