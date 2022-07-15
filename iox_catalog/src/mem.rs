@@ -1158,10 +1158,7 @@ impl ParquetFileRepo for MemTxn {
         // Sort partitions by file count
         partitions.sort_by(|a, b| b.1.cmp(a.1));
 
-        let mut partitions = partitions.iter().map(|(k, _)| **k).collect::<Vec<_>>();
-
-        // Return top partitions with most file counts
-        partitions.truncate(num_partitions as usize);
+        let partitions = partitions.into_iter().map(|(k, _)| k).take(num_partitions as usize).collect::<Vec<_>>();
 
         Ok(partitions)
     }

@@ -295,7 +295,7 @@ impl Compactor {
 
         let compaction_query_most_l0_duration: Metric<DurationHistogram> = registry
             .register_metric(
-                "compaction_query_most_l0__duration",
+                "compaction_query_most_l0_duration",
                 "Duration of a catalog query that gets partitions with the most level-0 files",
             );
 
@@ -359,7 +359,7 @@ impl Compactor {
         max_num_partitions_per_sequencer: i32,
         // Minimum number of the most recent writes per partition we want to count
         // to prioritize partitions
-        minimun_recent_ingested_files: i32,
+        minimum_recent_ingested_files: i32,
     ) -> Result<Vec<PartitionParam>> {
         let mut candidates =
             Vec::with_capacity(self.sequencers.len() * max_num_partitions_per_sequencer as usize);

@@ -96,7 +96,7 @@ pub struct CompactorConfig {
     /// Default: 1
     #[clap(
         long = "--compaction-max-number-partitions-per-sequencer",
-        env = "INFLUXDB_IOX_COMPACTION_MAX_NUMBER_PARTITION_PER_SEQUENCER",
+        env = "INFLUXDB_IOX_COMPACTION_MAX_NUMBER_PARTITIONS_PER_SEQUENCER",
         default_value = "1",
         action
     )]
