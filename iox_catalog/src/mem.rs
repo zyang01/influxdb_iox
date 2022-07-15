@@ -1116,12 +1116,21 @@ impl ParquetFileRepo for MemTxn {
         min_num_files: i32,
         num_partitions: i32,
     ) -> Result<Vec<PartitionParam>> {
-        let recent_time = Timestamp::new(
-            (self.time_provider.now() - Duration::from_secs(60 * 60 * num_hours as u64))
-                .timestamp_nanos(),
+        println!(
+            "Sequencer {}, num_hours: {}, min_num_files: {}, num_partitions: {}",
+            sequencer_id, num_hours, min_num_files, num_partitions
         );
 
+        let time_nano = (self.time_provider.now()
+            - Duration::from_secs(60 * 60 * num_hours as u64))
+        .timestamp_nanos();
+        let recent_time = Timestamp::new(time_nano);
+        println!("Recent time: {}", time_nano);
+
         let stage = self.stage();
+
+        println!("total num files: {}", stage.parquet_files.len());
+        println!("FILES: {:#?}", stage.parquet_files);
 
         // Get partition info of selected files
         let partitions = stage
@@ -1141,6 +1150,9 @@ impl ParquetFileRepo for MemTxn {
             })
             .collect::<Vec<_>>();
 
+        println!("--------");
+        println!("----- len: {}", partitions.len());
+
         // Count num of files per partition by simply count the number of partition duplicates
         let mut partition_duplicate_count: HashMap<PartitionParam, i32> =
             HashMap::with_capacity(partitions.len());
@@ -1149,16 +1161,29 @@ impl ParquetFileRepo for MemTxn {
             *count += 1;
         }
 
-        // Partitions with select file count > min_num_files
+        println!("----- len: {}", partition_duplicate_count.len());
+
+        // Partitions with select file count >= min_num_files
         let mut partitions = partition_duplicate_count
             .iter()
             .filter(|(_, v)| v >= &&min_num_files)
             .collect::<Vec<_>>();
 
+        println!("----- len: {}", partitions.len());
+
         // Sort partitions by file count
         partitions.sort_by(|a, b| b.1.cmp(a.1));
 
-        let partitions = partitions.into_iter().map(|(k, _)| k).take(num_partitions as usize).collect::<Vec<_>>();
+        println!("----- len: {}", partitions.len());
+
+        // only return top partitions
+        let num = num_partitions as usize;
+        let partitions = partitions
+            .into_iter()
+            .map(|(k, _)| *k)
+            .take(num)
+            .collect::<Vec<_>>();
+        println!("----- len: {}", partitions.len());
 
         Ok(partitions)
     }
@@ -1194,14 +1219,15 @@ impl ParquetFileRepo for MemTxn {
         }
 
         // Sort partitions by file count
-        // Partitions with select file count > min_num_files
         let mut partitions = partition_duplicate_count.iter().collect::<Vec<_>>();
         partitions.sort_by(|a, b| b.1.cmp(a.1));
 
-        let mut partitions = partitions.iter().map(|(k, _)| **k).collect::<Vec<_>>();
-
         // Return top partitions with most file counts
-        partitions.truncate(num_partitions as usize);
+        let partitions = partitions
+            .into_iter()
+            .map(|(k, _)| *k)
+            .take(num_partitions as usize)
+            .collect::<Vec<_>>();
 
         Ok(partitions)
     }

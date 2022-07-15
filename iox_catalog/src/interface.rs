@@ -2772,6 +2772,7 @@ pub(crate) mod test_helpers {
         let min_num_files = 2;
         let num_partitions = 2;
 
+        // Case 1
         // Db has no partition
         let partitions = repos
             .parquet_files()
@@ -2785,6 +2786,7 @@ pub(crate) mod test_helpers {
             .unwrap();
         assert!(partitions.is_empty());
 
+        // Case 2
         // The DB has 1 partition but it does not has any file
         let partition = repos
             .partitions()
@@ -2821,6 +2823,7 @@ pub(crate) mod test_helpers {
             (catalog.time_provider().now() - Duration::from_secs(60 * 60 * 10)).timestamp_nanos(),
         );
 
+        // Case 3
         // The partition has one deleted file
         let parquet_file_params = ParquetFileParams {
             sequencer_id: sequencer.id,
@@ -2860,6 +2863,7 @@ pub(crate) mod test_helpers {
             .unwrap();
         assert!(partitions.is_empty());
 
+        // Case 4
         // Partition has only 1 file created recently
         let l0_one_hour_ago_file_params = ParquetFileParams {
             object_store_id: Uuid::new_v4(),
@@ -2871,6 +2875,7 @@ pub(crate) mod test_helpers {
             .create(l0_one_hour_ago_file_params.clone())
             .await
             .unwrap();
+        // Case 4.1: min_num_files = 2
         let partitions = repos
             .parquet_files()
             .recent_highest_throughput_partitions(
@@ -2883,7 +2888,7 @@ pub(crate) mod test_helpers {
             .unwrap();
         // nothing return because the partition has only one recent L0 file which is smaller than min_num_files = 2
         assert!(partitions.is_empty());
-        // Let go with min_num_files = 1
+        // Case 4.2: min_num_files = 1
         let partitions = repos
             .parquet_files()
             .recent_highest_throughput_partitions(sequencer.id, num_hours, 1, num_partitions)
@@ -2892,6 +2897,7 @@ pub(crate) mod test_helpers {
         // and have one partition
         assert_eq!(partitions.len(), 1);
 
+        // Case 5
         // Let us create another partition with 2 L0 recent files
         let another_partition = repos
             .partitions()
@@ -2920,7 +2926,7 @@ pub(crate) mod test_helpers {
             .create(l0_3_hours_ago_file_params)
             .await
             .unwrap();
-        // select with minimun 2 files
+        // Case 5.1: min_num_files = 2
         let partitions = repos
             .parquet_files()
             .recent_highest_throughput_partitions(
@@ -2933,18 +2939,19 @@ pub(crate) mod test_helpers {
             .unwrap();
         assert_eq!(partitions.len(), 1);
         assert_eq!(partitions[0].partition_id, another_partition.id); // must be the partition with 2 files
-                                                                      // select with minimun 1 files
+                                                                      //
+                                                                      // Case 5.2: min_num_files = 1
         let partitions = repos
             .parquet_files()
             .recent_highest_throughput_partitions(sequencer.id, num_hours, 1, num_partitions)
             .await
             .unwrap();
-        println!("partitions: {:#?}", partitions);
         assert_eq!(partitions.len(), 2);
         assert_eq!(partitions[0].partition_id, another_partition.id); // partition with 2 files must be first
         assert_eq!(partitions[1].partition_id, partition.id);
 
-        // Add not-recent files to the first partition
+        // Case 6
+        // Add 2 not-recent files to the first partition
         let l0_5_hours_ago_file_params = ParquetFileParams {
             object_store_id: Uuid::new_v4(),
             created_at: time_five_hour_ago,
@@ -2967,7 +2974,7 @@ pub(crate) mod test_helpers {
             .create(l0_10_hours_ago_file_params)
             .await
             .unwrap();
-        // select with minimun 2 files
+        // Case 6.1: min_num_files = 2
         let partitions = repos
             .parquet_files()
             .recent_highest_throughput_partitions(
@@ -2978,16 +2985,16 @@ pub(crate) mod test_helpers {
             )
             .await
             .unwrap();
-        // result still 1 partition becasue the old files do not contribute to recent throughput
+        // result still 1 partition because the old files do not contribute to recent throughput
         assert_eq!(partitions.len(), 1);
         assert_eq!(partitions[0].partition_id, another_partition.id); // must be the partition with 2 files
-                                                                      // select with minimun 1 files
+                                                                      //
+                                                                      // Case 6.2: min_num_files = 1
         let partitions = repos
             .parquet_files()
             .recent_highest_throughput_partitions(sequencer.id, num_hours, 1, num_partitions)
             .await
             .unwrap();
-        println!("partitions: {:#?}", partitions);
         assert_eq!(partitions.len(), 2);
         assert_eq!(partitions[0].partition_id, another_partition.id); // partition with 2 files must be first
         assert_eq!(partitions[1].partition_id, partition.id);

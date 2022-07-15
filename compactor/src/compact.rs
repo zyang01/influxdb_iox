@@ -154,16 +154,23 @@ pub enum Error {
     },
 
     #[snafu(display(
-        "Error getting the most recent highest ingested throughput partitions for sequencer {}",
+        "Error getting the most recent highest ingested throughput partitions for sequencer {}. {}",
+        sequencer_id,
         source
     ))]
     HighestThroughputPartitions {
         source: iox_catalog::interface::Error,
+        sequencer_id: SequencerId,
     },
 
-    #[snafu(display("Error getting the most level 0 file partitions {}", source))]
+    #[snafu(display(
+        "Error getting the most level 0 file partitions for sequencer {}. {}",
+        sequencer_id,
+        source
+    ))]
     MostL0Partitions {
         source: iox_catalog::interface::Error,
+        sequencer_id: SequencerId,
     },
 }
 
@@ -240,14 +247,6 @@ pub struct Compactor {
 
     /// Histogram for tracking the time to compact a partition
     compaction_duration: Metric<DurationHistogram>,
-
-    /// Histogram for tracking the time of a catalog query to get
-    /// the most recent highest throughput partitions
-    compaction_query_highest_throughput_duration: Metric<DurationHistogram>,
-
-    /// Histogram for tracking the time of a catalog query to get
-    /// the most level 0 files partitions
-    compaction_query_most_l0_duration: Metric<DurationHistogram>,
 }
 
 impl Compactor {
@@ -287,18 +286,6 @@ impl Compactor {
             "Compact partition duration",
         );
 
-        let compaction_query_highest_throughput_duration: Metric<DurationHistogram> = registry
-            .register_metric(
-                "compaction_query_highest_throughput_duration",
-                "Duration of a catalog query that gets the most recent highest ingested throughput partitions",
-            );
-
-        let compaction_query_most_l0_duration: Metric<DurationHistogram> = registry
-            .register_metric(
-                "compaction_query_most_l0_duration",
-                "Duration of a catalog query that gets partitions with the most level-0 files",
-            );
-
         Self {
             sequencers,
             catalog,
@@ -312,8 +299,6 @@ impl Compactor {
             level_promotion_counter,
             compaction_candidate_gauge,
             compaction_duration,
-            compaction_query_highest_throughput_duration,
-            compaction_query_most_l0_duration,
         }
     }
 
@@ -342,14 +327,14 @@ impl Compactor {
 
     /// Return a list of the most recent highest ingested throughput partitions.
     /// The highest throughput partitions are prioritized as follows:
-    ///  1. If there are partitions with new writes within the last 4 hours, pick them.
-    ///  2. If no new writes in the last 4 hours, will look for partitions with new writes
+    ///  1. If there are partitions with new ingested files within the last 4 hours, pick them.
+    ///  2. If no new ingested files in the last 4 hours, will look for partitions with new writes
     ///     within the last 24 hours.
-    ///  3. If there are no writes within the last 24 hours, will look for partitions
-    ///     with any new writes in the past.
+    ///  3. If there are no ingested files within the last 24 hours, will look for partitions
+    ///     with any new ingested files in the past.
     ///
-    /// . New writes means non-deleted L0 files
-    /// . In all cases above, for each sequencer, N partitions with the most new writes will be selected
+    /// . New ingested files means non-deleted L0 files
+    /// . In all cases above, for each sequencer, N partitions with the most new ingested files will be selected
     ///     and the return list will include at most, P = N * S, partitions where S is the number of
     ///     sequencers this compactor handles.
     pub async fn partitions_to_compact(
@@ -359,7 +344,7 @@ impl Compactor {
         max_num_partitions_per_sequencer: i32,
         // Minimum number of the most recent writes per partition we want to count
         // to prioritize partitions
-        minimum_recent_ingested_files: i32,
+        min_recent_ingested_files: i32,
     ) -> Result<Vec<PartitionParam>> {
         let mut candidates =
             Vec::with_capacity(self.sequencers.len() * max_num_partitions_per_sequencer as usize);
@@ -373,26 +358,20 @@ impl Compactor {
             // the last 4 hours. If nothing, increase to 24 hours
             let mut num_partitions = 0;
             for num_hours in [4, 24] {
-                let start_time = self.time_provider.now();
+                println!("---- 1");
 
                 let mut partitions = repos
                     .parquet_files()
                     .recent_highest_throughput_partitions(
                         *sequencer_id,
                         num_hours,
-                        minimun_recent_ingested_files,
+                        min_recent_ingested_files,
                         max_num_partitions_per_sequencer,
                     )
                     .await
-                    .context(HighestThroughputPartitionsSnafu)?;
-
-                // Record metric for time to get recent throughput partition
-                if let Some(delta) = self.time_provider.now().checked_duration_since(start_time) {
-                    let duration = self
-                        .compaction_query_highest_throughput_duration
-                        .recorder(attributes.clone());
-                    duration.record(delta);
-                }
+                    .context(HighestThroughputPartitionsSnafu {
+                        sequencer_id: *sequencer_id,
+                    })?;
 
                 if !partitions.is_empty() {
                     num_partitions = partitions.len();
@@ -404,21 +383,15 @@ impl Compactor {
             // No active ingesting partitions the last 24 hours,
             // get partition with the most level-0 files
             if num_partitions == 0 {
-                let start_time = self.time_provider.now();
+                println!("---- 2");
 
                 let mut partitions = repos
                     .parquet_files()
                     .most_level_0_files_partitions(*sequencer_id, max_num_partitions_per_sequencer)
                     .await
-                    .context(MostL0PartitionsSnafu)?;
-
-                // Record metric for time to get partition of most level 0 files
-                if let Some(delta) = self.time_provider.now().checked_duration_since(start_time) {
-                    let duration = self
-                        .compaction_query_most_l0_duration
-                        .recorder(attributes.clone());
-                    duration.record(delta);
-                }
+                    .context(MostL0PartitionsSnafu {
+                        sequencer_id: *sequencer_id,
+                    })?;
 
                 if !partitions.is_empty() {
                     num_partitions = partitions.len();
@@ -2309,32 +2282,55 @@ mod tests {
             .create_or_get("four".into(), sequencer.id, table.id)
             .await
             .unwrap();
+        // another sequencer with one table and a partition
+        let another_table = txn
+            .tables()
+            .create_or_get("another_test_table", namespace.id)
+            .await
+            .unwrap();
+        let another_sequencer = txn
+            .sequencers()
+            .create_or_get(&kafka, KafkaPartition::new(2))
+            .await
+            .unwrap();
+        let another_partition = txn
+            .partitions()
+            .create_or_get(
+                "nother_partition".into(),
+                another_sequencer.id,
+                another_table.id,
+            )
+            .await
+            .unwrap();
         txn.commit().await.unwrap();
 
         // Create a compactor
         let config = make_compactor_config();
         let compactor = Compactor::new(
-            vec![sequencer.id],
+            vec![sequencer.id, another_sequencer.id],
             Arc::clone(&catalog.catalog),
             ParquetStorage::new(Arc::clone(&catalog.object_store)),
             Arc::new(Executor::new(1)),
-            Arc::new(SystemProvider::new()),
+            catalog.time_provider(),
             BackoffConfig::default(),
             config,
             Arc::new(metric::Registry::new()),
         );
 
-        // Some Time in the past to set to created_at of the files
+        // Some times in the past to set to created_at of the files
         // Time for testing
-        let time_now = Timestamp::new(catalog.time_provider().now().timestamp_nanos());
+        let time_now = Timestamp::new(compactor.time_provider.now().timestamp_nanos());
+        let _time_one_hour_ago = Timestamp::new(
+            (compactor.time_provider.now() - Duration::from_secs(60 * 60)).timestamp_nanos(),
+        );
         let time_three_hour_ago = Timestamp::new(
-            (catalog.time_provider().now() - Duration::from_secs(60 * 60 * 3)).timestamp_nanos(),
+            (compactor.time_provider.now() - Duration::from_secs(60 * 60 * 3)).timestamp_nanos(),
         );
         let time_five_hour_ago = Timestamp::new(
-            (catalog.time_provider().now() - Duration::from_secs(60 * 60 * 5)).timestamp_nanos(),
+            (compactor.time_provider.now() - Duration::from_secs(60 * 60 * 5)).timestamp_nanos(),
         );
         let time_38_hour_ago = Timestamp::new(
-            (catalog.time_provider().now() - Duration::from_secs(60 * 60 * 38)).timestamp_nanos(),
+            (compactor.time_provider.now() - Duration::from_secs(60 * 60 * 38)).timestamp_nanos(),
         );
 
         // Basic parquet info
@@ -2364,12 +2360,13 @@ mod tests {
 
         // --------------------------------------
         // Case 1: no files yet --> no partition candidates
+        println!("Case 1");
         let candidates = compactor.partitions_to_compact(1, 1).await.unwrap();
         assert!(candidates.is_empty());
 
         // --------------------------------------
         // Case 2: no non-deleleted L0 files -->  no partition candidates
-        //
+        println!("Case 2");
         // partition1 has a deleted L0
         let mut txn = catalog.catalog.start_transaction().await.unwrap();
         let pf1 = txn.parquet_files().create(p1.clone()).await.unwrap();
@@ -2393,7 +2390,7 @@ mod tests {
 
         // --------------------------------------
         // Case 3: no new recent writes (within the last 24 hours) --> return candidates with the most L0
-        //
+        println!("Case 3");
         // partition2 has an old (more 24 hours ago) non-deleted level 0 file
         let mut txn = catalog.catalog.start_transaction().await.unwrap();
         let p3 = ParquetFileParams {
@@ -2412,7 +2409,7 @@ mod tests {
 
         // --------------------------------------
         // Case 4: has one partition with recent writes (5 hours ago) --> return that partition
-        //
+        println!("Case 4");
         // partition4 has a new write 5 hours ago
         let mut txn = catalog.catalog.start_transaction().await.unwrap();
         let p4 = ParquetFileParams {
@@ -2434,7 +2431,7 @@ mod tests {
         //  1. Within the last 4 hours
         //  2. Within the last 24 hours but older than 4 hours ago
         // When we have group 1, we will ignore partitions in group 2
-        //
+        println!("Case 5");
         // partition3 has a new write 3 hours ago
         let mut txn = catalog.catalog.start_transaction().await.unwrap();
         let p5 = ParquetFileParams {
@@ -2450,6 +2447,27 @@ mod tests {
         let candidates = compactor.partitions_to_compact(1, 1).await.unwrap();
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].partition_id, partition3.id);
+
+        // --------------------------------------
+        // Case 6: Add another sequencer and a partition with one non-deleted level-0 file ingested 38 hours ago
+        println!("Case 6");
+        let mut txn = catalog.catalog.start_transaction().await.unwrap();
+        let p6 = ParquetFileParams {
+            object_store_id: Uuid::new_v4(),
+            partition_id: another_partition.id,
+            created_at: time_38_hour_ago,
+            ..p1.clone()
+        };
+        let _pf6 = txn.parquet_files().create(p6).await.unwrap();
+        txn.commit().await.unwrap();
+        // Will have 2 candidates, one for each sequencer
+        let mut candidates = compactor.partitions_to_compact(1, 1).await.unwrap();
+        candidates.sort_by(|a, b| b.partition_id.cmp(&a.partition_id));
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].partition_id, partition3.id);
+        assert_eq!(candidates[0].sequencer_id, sequencer.id);
+        assert_eq!(candidates[1].partition_id, another_partition.id);
+        assert_eq!(candidates[1].sequencer_id, another_sequencer.id);
     }
 
     #[tokio::test]
