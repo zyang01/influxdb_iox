@@ -169,6 +169,8 @@ pub async fn create_compactor_server_type(
         compactor_config.compaction_percentage_max_file_size,
         compactor_config.compaction_split_percentage,
         compactor_config.max_concurrent_compaction_size_bytes,
+        compactor_config.compaction_max_number_partitions_per_sequencer,
+        compactor_config.compaction_min_number_recent_writes_per_partition,
     );
     let compactor_handler = Arc::new(CompactorHandlerImpl::new(
         sequencers,

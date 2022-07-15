@@ -5,7 +5,7 @@ use backoff::{Backoff, BackoffConfig};
 use data_types::SequencerId;
 use futures::{
     future::{BoxFuture, Shared},
-    select, FutureExt, TryFutureExt,
+    FutureExt, TryFutureExt,
 };
 use iox_catalog::interface::Catalog;
 use iox_query::exec::Executor;
@@ -18,7 +18,6 @@ use tokio::task::{JoinError, JoinHandle};
 use tokio_util::sync::CancellationToken;
 
 use crate::compact::Compactor;
-use std::time::Duration;
 
 #[derive(Debug, Error)]
 #[allow(missing_copy_implementations, missing_docs)]
@@ -127,6 +126,12 @@ pub struct CompactorConfig {
     /// of the available memory to ensure compactions have
     /// enough space to run.
     max_concurrent_compaction_size_bytes: i64,
+
+    /// Max number of partitions per sequencer we want to compact per cycle
+    compaction_max_number_partitions_per_sequencer: i32,
+
+    /// Min number of recent writes a partition needs to be considered for compacting
+    compaction_min_number_recent_writes_per_partition: i32,
 }
 
 impl CompactorConfig {
@@ -137,6 +142,8 @@ impl CompactorConfig {
         compaction_percentage_max_file_size: i16,
         compaction_split_percentage: i16,
         max_concurrent_compaction_size_bytes: i64,
+        compaction_max_number_partitions_per_sequencer: i32,
+        compaction_min_number_recent_writes_per_partition: i32,
     ) -> Self {
         assert!(compaction_split_percentage > 0 && compaction_split_percentage <= 100);
 
@@ -146,6 +153,8 @@ impl CompactorConfig {
             compaction_percentage_max_file_size,
             compaction_split_percentage,
             max_concurrent_compaction_size_bytes,
+            compaction_max_number_partitions_per_sequencer,
+            compaction_min_number_recent_writes_per_partition,
         }
     }
 
@@ -177,6 +186,16 @@ impl CompactorConfig {
     pub fn max_concurrent_compaction_size_bytes(&self) -> i64 {
         self.max_concurrent_compaction_size_bytes
     }
+
+    /// Max number of partitions per sequencer we want to compact per cycle
+    pub fn compaction_max_number_partitions_per_sequencer(&self) -> i32 {
+        self.compaction_max_number_partitions_per_sequencer
+    }
+
+    /// Min number of recent writes a partition needs to be considered for compacting
+    pub fn compaction_min_number_recent_writes_per_partition(&self) -> i32 {
+        self.compaction_min_number_recent_writes_per_partition
+    }
 }
 
 /// Checks for candidate partitions to compact and spawns tokio tasks to compact as many
@@ -186,7 +205,16 @@ async fn run_compactor(compactor: Arc<Compactor>, shutdown: CancellationToken) {
     while !shutdown.is_cancelled() {
         let candidates = Backoff::new(&compactor.backoff_config)
             .retry_all_errors("partitions_to_compact", || async {
-                compactor.partitions_to_compact().await
+                compactor
+                    .partitions_to_compact(
+                        compactor
+                            .config
+                            .compaction_max_number_partitions_per_sequencer(),
+                        compactor
+                            .config
+                            .compaction_min_number_recent_writes_per_partition(),
+                    )
+                    .await
             })
             .await
             .expect("retry forever");
@@ -200,11 +228,8 @@ async fn run_compactor(compactor: Arc<Compactor>, shutdown: CancellationToken) {
         let n_candidates = candidates.len();
         debug!(n_candidates, "found compaction candidates");
 
-        let mut used_size = 0;
-        let max_size = compactor.config.max_concurrent_compaction_size_bytes();
-
-        let mut handles = vec![];
-
+        // Serially compact all candidates
+        // TODO: we will parallelize this when everything runs smoothly in serial
         for c in candidates {
             let compactor = Arc::clone(&compactor);
             let compact_and_upgrade = compactor
@@ -224,36 +249,22 @@ async fn run_compactor(compactor: Arc<Compactor>, shutdown: CancellationToken) {
                 }
                 Ok(compact_and_upgrade) => {
                     if compact_and_upgrade.compactable() {
-                        used_size += c.candidate.file_size_bytes;
-                        let handle = tokio::task::spawn(async move {
-                            debug!(candidate=?c, "compacting candidate");
-                            let res = compactor
-                                .compact_partition(
-                                    &c.namespace,
-                                    &c.table,
-                                    &c.table_schema,
-                                    c.candidate.partition_id,
-                                    compact_and_upgrade,
-                                )
-                                .await;
-                            if let Err(e) = res {
-                                warn!(
-                                    "compaction on partition {} failed with: {:?}",
-                                    c.candidate.partition_id, e
-                                );
-                            }
-                            debug!(candidate=?c, "compaction complete");
-                        });
-                        handles.push(handle);
-                        if used_size > max_size {
-                            debug!(
-                                %max_size,
-                                %used_size,
-                                n_compactions=%handles.len(),
-                                "reached maximum concurrent compaction size limit"
+                        let res = compactor
+                            .compact_partition(
+                                &c.namespace,
+                                &c.table,
+                                &c.table_schema,
+                                c.candidate.partition_id,
+                                compact_and_upgrade,
+                            )
+                            .await;
+                        if let Err(e) = res {
+                            warn!(
+                                "compaction on partition {} failed with: {:?}",
+                                c.candidate.partition_id, e
                             );
-                            break;
                         }
+                        debug!(candidate=?c, "compaction complete");
                     } else {
                         // All candidates should be compactable (have files to compact and/or
                         // upgrade).
@@ -261,28 +272,11 @@ async fn run_compactor(compactor: Arc<Compactor>, shutdown: CancellationToken) {
                         // it would be a waste of time to repeat this cycle
                         warn!(
                             "The candidate partition {} has no files to be either compacted or \
-                             upgraded",
+                                upgraded",
                             c.candidate.partition_id
                         );
                     }
                 }
-            }
-        }
-
-        let compactions_run = handles.len();
-        debug!(
-            ?compactions_run,
-            "Number of concurrent partitions are being compacted in this cycle"
-        );
-
-        let _ = futures::future::join_all(handles).await;
-
-        // if all candidate partitions have been compacted, wait a bit
-        // before checking again, waking early if cancel arrives
-        if compactions_run == n_candidates {
-            select! {
-                () = tokio::time::sleep(Duration::from_secs(5)).fuse() => {},
-                () = shutdown.cancelled().fuse() => {}
             }
         }
     }

@@ -397,6 +397,8 @@ impl Config {
             compaction_percentage_max_file_size: 30,
             compaction_split_percentage: 80,
             max_concurrent_compaction_size_bytes: 100000,
+            compaction_max_number_partitions_per_sequencer: 1,
+            compaction_min_number_recent_writes_per_partition: 1,
         };
 
         let querier_config = QuerierConfig {

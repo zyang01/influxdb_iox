@@ -91,4 +91,24 @@ pub struct CompactorConfig {
         action
     )]
     pub max_concurrent_compaction_size_bytes: i64,
+
+    /// Max number of partitions per sequencer we want to compact per cycle
+    /// Default: 1
+    #[clap(
+        long = "--compaction-max-number-partitions-per-sequencer",
+        env = "INFLUXDB_IOX_COMPACTION_MAX_NUMBER_PARTITION_PER_SEQUENCER",
+        default_value = "1",
+        action
+    )]
+    pub compaction_max_number_partitions_per_sequencer: i32,
+
+    /// Min number of recent writes a partition needs to be considered for compacting
+    /// Default: 1
+    #[clap(
+        long = "--compaction-min-number-recent-writes-per-partition",
+        env = "INFLUXDB_IOX_COMPACTION_MAX_NUMBER_PARTITION_PER_SEQUENCER",
+        default_value = "1",
+        action
+    )]
+    pub compaction_min_number_recent_writes_per_partition: i32,
 }
