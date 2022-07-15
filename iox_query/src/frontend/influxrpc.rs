@@ -225,7 +225,7 @@ impl InfluxRpcPlanner {
         database: &dyn QueryDatabase,
         rpc_predicate: InfluxRpcPredicate,
     ) -> Result<StringSetPlan> {
-        let _ctx = self.ctx.child_ctx("table_names planning");
+        let ctx = self.ctx.child_ctx("table_names planning");
         debug!(?rpc_predicate, "planning table_names");
 
         // Special case predicates that span the entire valid timestamp range
@@ -243,7 +243,7 @@ impl InfluxRpcPlanner {
             // Identify which chunks can answer from its metadata and then record its table,
             // and which chunks needs full plan and group them into their table
             let chunks = database
-                .chunks(table_name, predicate)
+                .chunks(table_name, predicate, ctx.child_ctx("table chunks"))
                 .await
                 .context(GettingChunksSnafu { table_name })?;
             for chunk in cheap_chunk_first(chunks) {
@@ -363,7 +363,7 @@ impl InfluxRpcPlanner {
             }
 
             let chunks = database
-                .chunks(table_name, predicate)
+                .chunks(table_name, predicate, ctx.child_ctx("table chunks"))
                 .await
                 .context(GettingChunksSnafu { table_name })?;
             for chunk in cheap_chunk_first(chunks) {
@@ -505,7 +505,7 @@ impl InfluxRpcPlanner {
             .context(CreatingPredicatesSnafu)?;
         for (table_name, predicate) in &table_predicates {
             let chunks = database
-                .chunks(table_name, predicate)
+                .chunks(table_name, predicate, ctx.child_ctx("table chunks"))
                 .await
                 .context(GettingChunksSnafu { table_name })?;
             for chunk in cheap_chunk_first(chunks) {
@@ -691,7 +691,7 @@ impl InfluxRpcPlanner {
                 continue;
             }
             let chunks = database
-                .chunks(table_name, predicate)
+                .chunks(table_name, predicate, ctx.child_ctx("table chunks"))
                 .await
                 .context(GettingChunksSnafu { table_name })?;
             let chunks = prune_chunks_metadata(chunks, predicate)?;
@@ -749,7 +749,7 @@ impl InfluxRpcPlanner {
         let mut ss_plans = Vec::with_capacity(table_predicates.len());
         for (table_name, predicate) in &table_predicates {
             let chunks = database
-                .chunks(table_name, predicate)
+                .chunks(table_name, predicate, ctx.child_ctx("table chunks"))
                 .await
                 .context(GettingChunksSnafu { table_name })?;
             let chunks = prune_chunks_metadata(chunks, predicate)?;
@@ -812,7 +812,7 @@ impl InfluxRpcPlanner {
 
         for (table_name, predicate) in &table_predicates {
             let chunks = database
-                .chunks(table_name, predicate)
+                .chunks(table_name, predicate, ctx.child_ctx("table chunks"))
                 .await
                 .context(GettingChunksSnafu { table_name })?;
             let chunks = prune_chunks_metadata(chunks, predicate)?;
@@ -883,7 +883,7 @@ impl InfluxRpcPlanner {
         let mut ss_plans = Vec::with_capacity(table_predicates.len());
         for (table_name, predicate) in &table_predicates {
             let chunks = database
-                .chunks(table_name, predicate)
+                .chunks(table_name, predicate, ctx.child_ctx("table chunks"))
                 .await
                 .context(GettingChunksSnafu { table_name })?;
             let chunks = prune_chunks_metadata(chunks, predicate)?;

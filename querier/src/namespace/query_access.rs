@@ -40,6 +40,7 @@ impl QueryDatabase for QuerierNamespace {
         &self,
         table_name: &str,
         predicate: &Predicate,
+        _ctx: IOxSessionContext,
     ) -> Result<Vec<Arc<dyn QueryChunk>>, QueryDatabaseError> {
         debug!(%table_name, %predicate, "Finding chunks for table");
         // get table metadata
