@@ -1112,7 +1112,7 @@ impl Compactor {
     }
 }
 
-/// [`PartitionCompactionCandidate`] with some information about its table and namespace.
+/// [`PartitionParam`] with some information about its table and namespace.
 #[derive(Debug)]
 pub struct PartitionCompactionCandidateWithInfo {
     /// Partition compaction candidate.
