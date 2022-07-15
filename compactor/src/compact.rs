@@ -362,7 +362,7 @@ impl Compactor {
         minimun_recent_ingested_files: i32,
     ) -> Result<Vec<PartitionParam>> {
         let mut candidates =
-            Vec::with_capacity(self.sequencers.len() * num_partitions_per_sequencer as usize);
+            Vec::with_capacity(self.sequencers.len() * max_num_partitions_per_sequencer as usize);
         let mut repos = self.catalog.repositories().await;
 
         for sequencer_id in &self.sequencers {
@@ -381,7 +381,7 @@ impl Compactor {
                         *sequencer_id,
                         num_hours,
                         minimun_recent_ingested_files,
-                        num_partitions_per_sequencer,
+                        max_num_partitions_per_sequencer,
                     )
                     .await
                     .context(HighestThroughputPartitionsSnafu)?;
@@ -408,7 +408,7 @@ impl Compactor {
 
                 let mut partitions = repos
                     .parquet_files()
-                    .most_level_0_files_partitions(*sequencer_id, num_partitions_per_sequencer)
+                    .most_level_0_files_partitions(*sequencer_id, max_num_partitions_per_sequencer)
                     .await
                     .context(MostL0PartitionsSnafu)?;
 
