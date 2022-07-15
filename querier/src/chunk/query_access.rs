@@ -109,7 +109,7 @@ impl QueryChunk for QuerierChunk {
 
     fn column_names(
         &self,
-        mut ctx: IOxSessionContext,
+        ctx: IOxSessionContext,
         predicate: &Predicate,
         columns: Selection<'_>,
     ) -> Result<Option<StringSet>, QueryChunkError> {
@@ -173,7 +173,7 @@ impl QueryChunk for QuerierChunk {
 
     fn column_values(
         &self,
-        mut ctx: IOxSessionContext,
+        ctx: IOxSessionContext,
         column_name: &str,
         predicate: &Predicate,
     ) -> Result<Option<StringSet>, QueryChunkError> {
@@ -229,7 +229,7 @@ impl QueryChunk for QuerierChunk {
 
     fn read_filter(
         &self,
-        mut ctx: IOxSessionContext,
+        ctx: IOxSessionContext,
         predicate: &Predicate,
         selection: Selection<'_>,
     ) -> Result<SendableRecordBatchStream, QueryChunkError> {
@@ -444,7 +444,7 @@ impl Stream for ReadFilterResultsStream {
     type Item = ArrowResult<RecordBatch>;
 
     fn poll_next(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut ctx = self.ctx.child_ctx("next_row_group");
+        let ctx = self.ctx.child_ctx("next_row_group");
         let rb = self.read_results.next();
         if let Some(rb) = &rb {
             ctx.set_metadata("output_rows", rb.num_rows() as i64);

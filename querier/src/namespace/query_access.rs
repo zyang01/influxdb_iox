@@ -40,7 +40,7 @@ impl QueryDatabase for QuerierNamespace {
         &self,
         table_name: &str,
         predicate: &Predicate,
-        _ctx: IOxSessionContext,
+        ctx: IOxSessionContext,
     ) -> Result<Vec<Arc<dyn QueryChunk>>, QueryDatabaseError> {
         debug!(%table_name, %predicate, "Finding chunks for table");
         // get table metadata
@@ -53,7 +53,9 @@ impl QueryDatabase for QuerierNamespace {
             }
         };
 
-        let mut chunks = table.chunks(predicate).await?;
+        let mut chunks = table
+            .chunks(predicate, ctx.child_span("querier table chunks"))
+            .await?;
 
         // if there is a field restriction on the predicate, only
         // chunks with that field should be returned. If the chunk has
@@ -82,7 +84,7 @@ impl QueryDatabase for QuerierNamespace {
         // When the query token is dropped the query entry's completion time
         // will be set.
         let query_log = Arc::clone(&self.query_log);
-        let trace_id = ctx.span().map(|s| s.ctx.trace_id);
+        let trace_id = ctx.trace_id();
         let entry = query_log.push(self.id, query_type, query_text, trace_id);
         QueryCompletedToken::new(move |success| query_log.set_completed(entry, success))
     }
@@ -195,6 +197,7 @@ mod tests {
     use data_types::ColumnType;
     use iox_query::frontend::sql::SqlQueryPlanner;
     use iox_tests::util::{TestCatalog, TestParquetFileBuilder};
+    use trace::{span::SpanStatus, RingBufferTraceCollector};
 
     #[tokio::test]
     async fn test_query() {
@@ -327,7 +330,10 @@ mod tests {
 
         let querier_namespace = Arc::new(querier_namespace(&ns).await);
 
-        assert_query(
+        let traces = Arc::new(RingBufferTraceCollector::new(100));
+        let span_ctx = SpanContext::new(Arc::clone(&traces) as _);
+
+        assert_query_with_span_ctx(
             &querier_namespace,
             "SELECT * FROM cpu ORDER BY host,time",
             &[
@@ -340,8 +346,18 @@ mod tests {
                 "|     | b    | 5    | 1970-01-01T00:00:00.000000011Z |",
                 "+-----+------+------+--------------------------------+",
             ],
+            Some(span_ctx),
         )
         .await;
+
+        let span = traces
+            .spans()
+            .into_iter()
+            .find(|s| s.name == "querier table chunks")
+            .expect("tracing span not found");
+
+        assert_eq!(span.status, SpanStatus::Ok);
+
         assert_query(
             &querier_namespace,
             "SELECT * FROM mem ORDER BY host,time",
@@ -471,7 +487,16 @@ mod tests {
         sql: &str,
         expected_lines: &[&str],
     ) {
-        let results = run(querier_namespace, sql).await;
+        assert_query_with_span_ctx(querier_namespace, sql, expected_lines, None).await
+    }
+
+    async fn assert_query_with_span_ctx(
+        querier_namespace: &Arc<QuerierNamespace>,
+        sql: &str,
+        expected_lines: &[&str],
+        span_ctx: Option<SpanContext>,
+    ) {
+        let results = run(querier_namespace, sql, span_ctx).await;
         assert_batches_sorted_eq!(expected_lines, &results);
     }
 
@@ -480,13 +505,17 @@ mod tests {
         sql: &str,
         expected_lines: &[&str],
     ) {
-        let results = run(querier_namespace, sql).await;
+        let results = run(querier_namespace, sql, None).await;
         assert_batches_eq!(expected_lines, &results);
     }
 
-    async fn run(querier_namespace: &Arc<QuerierNamespace>, sql: &str) -> Vec<RecordBatch> {
+    async fn run(
+        querier_namespace: &Arc<QuerierNamespace>,
+        sql: &str,
+        span_ctx: Option<SpanContext>,
+    ) -> Vec<RecordBatch> {
         let planner = SqlQueryPlanner::default();
-        let ctx = querier_namespace.new_query_context(None);
+        let ctx = querier_namespace.new_query_context(span_ctx);
 
         let physical_plan = planner
             .query(sql, &ctx)

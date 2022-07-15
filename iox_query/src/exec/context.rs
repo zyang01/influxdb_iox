@@ -3,7 +3,17 @@
 
 use async_trait::async_trait;
 use executor::DedicatedExecutor;
-use std::{convert::TryInto, fmt, sync::Arc};
+use hashbrown::HashMap;
+use once_cell::sync::Lazy;
+use parking_lot::Mutex;
+use std::{
+    convert::TryInto,
+    fmt,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 
 use arrow::record_batch::RecordBatch;
 
@@ -26,8 +36,8 @@ use datafusion::{
 use futures::TryStreamExt;
 use observability_deps::tracing::debug;
 use trace::{
-    ctx::SpanContext,
-    span::{MetaValue, SpanRecorder},
+    ctx::{SpanContext, TraceId},
+    span::{MetaValue, Span, SpanRecorder},
 };
 
 use crate::exec::{
@@ -51,7 +61,6 @@ use crate::plan::{
 
 // Reuse DataFusion error and Result types for this module
 pub use datafusion::error::{DataFusionError as Error, Result};
-use trace::span::Span;
 
 use super::{
     non_null_checker::NonNullCheckerNode, seriesset::series::Either, split::StreamSplitNode,
@@ -180,6 +189,18 @@ impl fmt::Debug for IOxSessionConfig {
 const BATCH_SIZE: usize = 1000;
 const COALESCE_BATCH_SIZE: usize = 500;
 
+/// Generator for [`IOxSessionContext`] IDs.
+///
+/// Start at `1` because `0` is used as a default for unknown DataFusion config options.
+static CONTEXT_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+/// Key within the DataFusion config options that is used to pass [`IOxSessionContext`] IDs around.
+const CONFIG_OPTIONS_KEY: &str = "IOX_SESSION_CONTEXT_ID";
+
+/// [`IOxSessionContext`] ID -> [`SpanRecorder`]
+static SPAN_RECORDERS: Lazy<Mutex<HashMap<u64, Arc<Mutex<SpanRecorder>>>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
 impl IOxSessionConfig {
     pub(super) fn new(exec: DedicatedExecutor, runtime: Arc<RuntimeEnv>) -> Self {
         let session_config = SessionConfig::new()
@@ -236,11 +257,7 @@ impl IOxSessionConfig {
 
         let maybe_span = self.span_ctx.map(|ctx| ctx.child("Query Execution"));
 
-        IOxSessionContext {
-            inner,
-            exec: Some(self.exec),
-            recorder: SpanRecorder::new(maybe_span),
-        }
+        IOxSessionContext::new(inner, Some(self.exec), SpanRecorder::new(maybe_span))
     }
 }
 
@@ -269,7 +286,10 @@ pub struct IOxSessionContext {
     exec: Option<DedicatedExecutor>,
 
     /// Span context from which to create spans for this query
-    recorder: SpanRecorder,
+    recorder: Arc<Mutex<SpanRecorder>>,
+
+    /// ID.
+    id: u64,
 }
 
 impl fmt::Debug for IOxSessionContext {
@@ -281,6 +301,28 @@ impl fmt::Debug for IOxSessionContext {
 }
 
 impl IOxSessionContext {
+    /// Private constructor
+    fn new(inner: SessionContext, exec: Option<DedicatedExecutor>, recorder: SpanRecorder) -> Self {
+        let id = CONTEXT_ID_COUNTER.fetch_add(1, Ordering::SeqCst);
+
+        let recorder = Arc::new(Mutex::new(recorder));
+        SPAN_RECORDERS.lock().insert(id, Arc::clone(&recorder));
+
+        inner
+            .state
+            .write()
+            .config
+            .config_options
+            .set_u64(CONFIG_OPTIONS_KEY, id);
+
+        Self {
+            inner,
+            exec,
+            recorder,
+            id,
+        }
+    }
+
     /// returns a reference to the inner datafusion execution context
     pub fn inner(&self) -> &SessionContext {
         &self.inner
@@ -298,11 +340,11 @@ impl IOxSessionContext {
 
     /// Prepare (optimize + plan) a pre-created [`LogicalPlan`] for execution
     pub async fn create_physical_plan(&self, plan: &LogicalPlan) -> Result<Arc<dyn ExecutionPlan>> {
-        let mut ctx = self.child_ctx("create_physical_plan");
+        let ctx = self.child_ctx("create_physical_plan");
         debug!(text=%plan.display_indent_schema(), "create_physical_plan: initial plan");
         let physical_plan = ctx.inner.create_physical_plan(plan).await?;
 
-        ctx.recorder.event("physical plan");
+        ctx.recorder.lock().event("physical plan");
         debug!(text=%displayable(physical_plan.as_ref()).indent(), "create_physical_plan: plan to run");
         Ok(physical_plan)
     }
@@ -360,6 +402,7 @@ impl IOxSessionContext {
     ) -> Result<SendableRecordBatchStream> {
         let span = self
             .recorder
+            .lock()
             .span()
             .map(|span| span.child("execute_stream_partitioned"));
 
@@ -574,30 +617,57 @@ impl IOxSessionContext {
 
     /// Returns a IOxSessionContext with a SpanRecorder that is a child of the current
     pub fn child_ctx(&self, name: &'static str) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            exec: self.exec.clone(),
-            recorder: self.recorder.child(name),
-        }
+        Self::new(
+            self.inner.clone(),
+            self.exec.clone(),
+            self.recorder.lock().child(name),
+        )
+    }
+
+    /// Create a child [`Span`].
+    pub fn child_span(&self, name: &'static str) -> Option<Span> {
+        self.recorder.lock().span().map(|span| span.child(name))
     }
 
     /// Record an event on the span recorder
-    pub fn record_event(&mut self, name: &'static str) {
-        self.recorder.event(name);
+    pub fn record_event(&self, name: &'static str) {
+        self.recorder.lock().event(name);
     }
 
     /// Record an event on the span recorder
-    pub fn set_metadata(&mut self, name: &'static str, value: impl Into<MetaValue>) {
-        self.recorder.set_metadata(name, value);
+    pub fn set_metadata(&self, name: &'static str, value: impl Into<MetaValue>) {
+        self.recorder.lock().set_metadata(name, value);
     }
 
-    /// Returns the current [`Span`] if any
-    pub fn span(&self) -> Option<&Span> {
-        self.recorder.span()
+    /// Returns the current [`TraceId`] if any
+    pub fn trace_id(&self) -> Option<TraceId> {
+        self.recorder.lock().span().map(|span| span.ctx.trace_id)
     }
 
     /// Number of currently active tasks.
     pub fn tasks(&self) -> usize {
         self.exec.as_ref().map(|e| e.tasks()).unwrap_or_default()
+    }
+}
+
+impl Drop for IOxSessionContext {
+    fn drop(&mut self) {
+        SPAN_RECORDERS.lock().remove(&self.id);
+    }
+}
+
+/// Extension trait to pull IOx spans out of DataFusion contexts.
+pub trait SessionContextIOxExt {
+    /// Get child span of the current context.
+    fn child_span(&self, name: &'static str) -> Option<Span>;
+}
+
+impl SessionContextIOxExt for SessionState {
+    fn child_span(&self, name: &'static str) -> Option<Span> {
+        let id = self.config.config_options.get_u64(CONFIG_OPTIONS_KEY);
+        SPAN_RECORDERS
+            .lock()
+            .get(&id)
+            .and_then(|span_recorder| span_recorder.lock().span().map(|span| span.child(name)))
     }
 }

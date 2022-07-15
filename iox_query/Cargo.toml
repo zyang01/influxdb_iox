@@ -27,6 +27,7 @@ futures = "0.3"
 hashbrown = "0.12"
 itertools = "0.10.2"
 observability_deps = { path = "../observability_deps" }
+once_cell = { version = "1.13.0", features = ["parking_lot"] }
 parking_lot = "0.12"
 query_functions = { path = "../query_functions"}
 schema = { path = "../schema" }

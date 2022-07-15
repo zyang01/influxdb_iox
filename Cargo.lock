@@ -2356,6 +2356,7 @@ dependencies = [
  "hashbrown",
  "itertools",
  "observability_deps",
+ "once_cell",
  "parking_lot 0.12.1",
  "predicate",
  "query_functions",

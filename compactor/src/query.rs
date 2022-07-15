@@ -219,7 +219,7 @@ impl QueryChunk for QueryableParquetChunk {
     /// streams from several different `QueryChunk`s.
     fn read_filter(
         &self,
-        mut ctx: IOxSessionContext,
+        ctx: IOxSessionContext,
         predicate: &Predicate,
         selection: Selection<'_>,
     ) -> Result<SendableRecordBatchStream, QueryChunkError> {

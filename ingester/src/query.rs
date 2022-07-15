@@ -185,7 +185,7 @@ impl QueryChunk for QueryableBatch {
     /// asynchronous stream of `RecordBatch`es
     fn read_filter(
         &self,
-        mut ctx: IOxSessionContext,
+        ctx: IOxSessionContext,
         _predicate: &Predicate,
         selection: Selection<'_>,
     ) -> Result<SendableRecordBatchStream, QueryChunkError> {
