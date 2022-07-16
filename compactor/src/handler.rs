@@ -99,27 +99,27 @@ impl CompactorHandlerImpl {
 #[derive(Debug, Clone, Copy)]
 pub struct CompactorConfig {
     /// Max number of level-0 files (written by ingester) we want to compact with level-1 each time
-    compaction_max_number_level_0_files: i32,
+    max_number_level_0_files: i32,
 
     /// Desired max size of compacted parquet files
     /// It is a target desired value than a guarantee
-    compaction_max_desired_file_size_bytes: i64,
+    max_desired_file_size_bytes: i64,
 
     /// Percentage of desired max file size.
     /// If the estimated compacted result is too small, no need to split it.
     /// This percentage is to determine how small it is:
-    ///    < compaction_percentage_max_file_size * compaction_max_desired_file_size_bytes:
+    ///    < percentage_max_file_size * max_desired_file_size_bytes:
     /// This value must be between (0, 100)
-    compaction_percentage_max_file_size: i16,
+    percentage_max_file_size: i16,
 
     /// Split file percentage
     /// If the estimated compacted result is neither too small nor too large, it will be split
     /// into 2 files determined by this percentage.
-    ///    . Too small means: < compaction_percentage_max_file_size * compaction_max_desired_file_size_bytes
-    ///    . Too large means: > compaction_max_desired_file_size_bytes
+    ///    . Too small means: < percentage_max_file_size * max_desired_file_size_bytes
+    ///    . Too large means: > max_desired_file_size_bytes
     ///    . Any size in the middle will be considered neither too small nor too large
     /// This value must be between (0, 100)
-    compaction_split_percentage: i16,
+    split_percentage: i16,
 
     /// The compactor will limit the number of simultaneous compaction jobs based on the
     /// size of the input files to be compacted.  This number should be less than 1/10th
@@ -128,54 +128,54 @@ pub struct CompactorConfig {
     max_concurrent_compaction_size_bytes: i64,
 
     /// Max number of partitions per sequencer we want to compact per cycle
-    compaction_max_number_partitions_per_sequencer: i32,
+    max_number_partitions_per_sequencer: i32,
 
-    /// Min number of recent writes a partition needs to be considered for compacting
-    compaction_min_number_recent_writes_per_partition: i32,
+    /// Min number of recent ingested files a partition needs to be considered for compacting
+    min_number_recent_ingested_files_per_partition: i32,
 }
 
 impl CompactorConfig {
     /// Initialize a valid config
     pub fn new(
-        compaction_max_number_level_0_files: i32,
-        compaction_max_desired_file_size_bytes: i64,
-        compaction_percentage_max_file_size: i16,
-        compaction_split_percentage: i16,
+        max_number_level_0_files: i32,
+        max_desired_file_size_bytes: i64,
+        percentage_max_file_size: i16,
+        split_percentage: i16,
         max_concurrent_compaction_size_bytes: i64,
-        compaction_max_number_partitions_per_sequencer: i32,
-        compaction_min_number_recent_writes_per_partition: i32,
+        max_number_partitions_per_sequencer: i32,
+        min_number_recent_ingested_files_per_partition: i32,
     ) -> Self {
-        assert!(compaction_split_percentage > 0 && compaction_split_percentage <= 100);
+        assert!(split_percentage > 0 && split_percentage <= 100);
 
         Self {
-            compaction_max_number_level_0_files,
-            compaction_max_desired_file_size_bytes,
-            compaction_percentage_max_file_size,
-            compaction_split_percentage,
+            max_number_level_0_files,
+            max_desired_file_size_bytes,
+            percentage_max_file_size,
+            split_percentage,
             max_concurrent_compaction_size_bytes,
-            compaction_max_number_partitions_per_sequencer,
-            compaction_min_number_recent_writes_per_partition,
+            max_number_partitions_per_sequencer,
+            min_number_recent_ingested_files_per_partition,
         }
     }
 
     /// Max number of level-0 files we want to compact with level-1 each time
-    pub fn compaction_max_number_level_0_files(&self) -> i32 {
-        self.compaction_max_number_level_0_files
+    pub fn max_number_level_0_files(&self) -> i32 {
+        self.max_number_level_0_files
     }
 
     /// Desired max file of a compacted file
-    pub fn compaction_max_desired_file_size_bytes(&self) -> i64 {
-        self.compaction_max_desired_file_size_bytes
+    pub fn max_desired_file_size_bytes(&self) -> i64 {
+        self.max_desired_file_size_bytes
     }
 
     /// Percentage of desired max file size to determine a size is too small
-    pub fn compaction_percentage_max_file_size(&self) -> i16 {
-        self.compaction_percentage_max_file_size
+    pub fn percentage_max_file_size(&self) -> i16 {
+        self.percentage_max_file_size
     }
 
     /// Percentage of least recent data we want to split to reduce compacting non-overlapped data
-    pub fn compaction_split_percentage(&self) -> i16 {
-        self.compaction_split_percentage
+    pub fn split_percentage(&self) -> i16 {
+        self.split_percentage
     }
 
     /// The compactor will limit the number of simultaneous compaction jobs based on the
@@ -188,13 +188,13 @@ impl CompactorConfig {
     }
 
     /// Max number of partitions per sequencer we want to compact per cycle
-    pub fn compaction_max_number_partitions_per_sequencer(&self) -> i32 {
-        self.compaction_max_number_partitions_per_sequencer
+    pub fn max_number_partitions_per_sequencer(&self) -> i32 {
+        self.max_number_partitions_per_sequencer
     }
 
-    /// Min number of recent writes a partition needs to be considered for compacting
-    pub fn compaction_min_number_recent_writes_per_partition(&self) -> i32 {
-        self.compaction_min_number_recent_writes_per_partition
+    /// Min number of recent ingested files a partition needs to be considered for compacting
+    pub fn min_number_recent_ingested_files_per_partition(&self) -> i32 {
+        self.min_number_recent_ingested_files_per_partition
     }
 }
 
@@ -207,12 +207,10 @@ async fn run_compactor(compactor: Arc<Compactor>, shutdown: CancellationToken) {
             .retry_all_errors("partitions_to_compact", || async {
                 compactor
                     .partitions_to_compact(
+                        compactor.config.max_number_partitions_per_sequencer(),
                         compactor
                             .config
-                            .compaction_max_number_partitions_per_sequencer(),
-                        compactor
-                            .config
-                            .compaction_min_number_recent_writes_per_partition(),
+                            .min_number_recent_ingested_files_per_partition(),
                     )
                     .await
             })

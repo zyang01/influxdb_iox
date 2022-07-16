@@ -1348,7 +1348,7 @@ mod tests {
             .with_max_seq(1)
             .with_min_time(10)
             .with_max_time(20)
-            .with_file_size_bytes(compactor.config.compaction_max_desired_file_size_bytes() + 10)
+            .with_file_size_bytes(compactor.config.max_desired_file_size_bytes() + 10)
             .with_creation_time(20);
         partition.create_parquet_file(builder).await;
 
@@ -2589,21 +2589,21 @@ mod tests {
     }
 
     fn make_compactor_config() -> CompactorConfig {
-        let compaction_max_number_level_0_files = 3;
-        let compaction_max_desired_file_size_bytes = 10_000;
-        let compaction_percentage_max_file_size = 30;
-        let compaction_split_percentage = 80;
+        let max_number_level_0_files = 3;
+        let max_desired_file_size_bytes = 10_000;
+        let percentage_max_file_size = 30;
+        let split_percentage = 80;
         let max_concurrent_compaction_size_bytes = 100_000;
-        let compaction_max_number_partitions_per_sequencer = 1;
-        let compaction_min_number_recent_writes_per_partition = 1;
+        let max_number_partitions_per_sequencer = 1;
+        let min_number_recent_ingested_per_partition = 1;
         CompactorConfig::new(
-            compaction_max_number_level_0_files,
-            compaction_max_desired_file_size_bytes,
-            compaction_percentage_max_file_size,
-            compaction_split_percentage,
+            max_number_level_0_files,
+            max_desired_file_size_bytes,
+            percentage_max_file_size,
+            split_percentage,
             max_concurrent_compaction_size_bytes,
-            compaction_max_number_partitions_per_sequencer,
-            compaction_min_number_recent_writes_per_partition,
+            max_number_partitions_per_sequencer,
+            min_number_recent_ingested_per_partition,
         )
     }
 }
