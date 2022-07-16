@@ -2606,7 +2606,7 @@ pub(crate) mod test_helpers {
         println!("partitions: {:#?}", partitions);
         assert!(partitions.is_empty());
 
-        // The DB has 1 partition but it does not has any file
+        // The DB has 1 partition but it does not have any file
         let partition = repos
             .partitions()
             .create_or_get("one".into(), sequencer.id, table.id)
@@ -2787,7 +2787,7 @@ pub(crate) mod test_helpers {
         assert!(partitions.is_empty());
 
         // Case 2
-        // The DB has 1 partition but it does not has any file
+        // The DB has 1 partition but it does not have any file
         let partition = repos
             .partitions()
             .create_or_get("one".into(), sequencer.id, table.id)
