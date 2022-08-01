@@ -74,7 +74,7 @@ impl Client {
 
         match response.status() {
             StatusCode::OK => Ok(response
-                .json::<String>()
+                .text()
                 .await
                 .context(ReqwestProcessingSnafu)?),
             status => {
