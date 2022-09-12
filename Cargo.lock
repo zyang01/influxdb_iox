@@ -2032,6 +2032,7 @@ name = "influxdb2_client"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "flate2",
  "futures",
  "mockito",
  "once_cell",

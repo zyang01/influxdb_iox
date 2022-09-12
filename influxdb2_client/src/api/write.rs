@@ -2,11 +2,9 @@
 
 use crate::models::WriteDataPoint;
 use crate::{Client, HttpSnafu, RequestError, ReqwestProcessingSnafu};
-use bytes::BufMut;
 use futures::{Stream, StreamExt};
 use reqwest::{Body, Method};
 use snafu::ResultExt;
-use std::io::{self, Write};
 
 impl Client {
     /// Write line protocol data to the specified organization and bucket.
@@ -22,6 +20,7 @@ impl Client {
         let response = self
             .request(Method::POST, &write_url)
             .query(&[("bucket", bucket), ("org", org)])
+            .header("Content-Encoding", "gzip")
             .body(body)
             .send()
             .await
@@ -44,6 +43,7 @@ impl Client {
         bucket: &str,
         body: impl Stream<Item = impl WriteDataPoint> + Send + Sync + 'static,
     ) -> Result<(), RequestError> {
+        /*
         let mut buffer = bytes::BytesMut::new();
 
         let body = body.map(move |point| {
@@ -54,6 +54,15 @@ impl Client {
         });
 
         let body = Body::wrap_stream(body);
+        */
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+
+        body.for_each(|point| {
+            point.write_data_point_to(&mut encoder).unwrap();
+            futures::future::ready(())
+        }).await;
+
+        let body = Body::from(encoder.finish().unwrap());
 
         self.write_line_protocol(org, bucket, body).await
     }
@@ -77,6 +86,7 @@ mod tests {
             format!("/api/v2/write?bucket={}&org={}", bucket, org).as_str(),
         )
         .match_header("Authorization", format!("Token {}", token).as_str())
+        // .match_header("Content-Encoding", "gzip")
         .match_body(
             "\
 cpu,host=server01 usage=0.5
