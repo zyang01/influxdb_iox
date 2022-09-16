@@ -62,6 +62,8 @@
 //! }
 //! ```
 
+use std::time::Duration;
+
 use reqwest::Method;
 use snafu::Snafu;
 
@@ -128,7 +130,7 @@ impl Client {
         Self {
             url: url.into(),
             auth_header,
-            reqwest: reqwest::Client::new(),
+            reqwest: reqwest::Client::builder().timeout(Duration::from_secs(5)).build().unwrap(),
             jaeger_debug_header: None,
         }
     }
